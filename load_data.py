@@ -23,7 +23,8 @@ def getRandomInstances():
             instanceInfo = {}
             instanceInfo["weights"] = []
             fileName = PurePosixPath(instanceFile).name
-            instanceInfo["optimal_solution"] = sols[fileName]
+            instanceInfo["file_name"] = fileName
+            instanceInfo["optimal_solution"] = int(sols[fileName])
 
             with instanceFile.open() as f:
                 i = 0
