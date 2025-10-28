@@ -21,7 +21,7 @@ def loadInstances(instancesDir, solutions, solvedOnly):
         if instanceFile.is_file():
             fileName = PurePosixPath(instanceFile).name
             if fileName not in sols:
-                print("Skipping")
+                # print("Skipping")
                 continue
             instanceInfo = {}
             instanceInfo["weights"] = []
@@ -45,26 +45,29 @@ def loadInstances(instancesDir, solutions, solvedOnly):
                     line = f.readline()
                     i += 1
             instances.append(instanceInfo)
-    print(instances)
+
     return instances
 
+
 # Each dataset being loaded in here is from BPPLIB
-# Each can either be given a True to just include solved instances, and False to include all instances
+# The first 2 datasets here are completely solved, but the ANI and AI datasets are not
+# An option has been included to choose to use just solved instances
 # If we include all instances then in cases they aren't solved we simply use the lower bound on the number of bins
+
 # Load the dataset of Random Generated instances
-def getRandomInstances(solvedOnly):
+def getRandomInstances():
     instancesDir = Path("./Datasets/Randomly_Generated")
     randSolutions = Path("./Datasets/Solutions/RandomInstanceSolutions.csv")
 
-    return loadInstances(instancesDir, randSolutions, solvedOnly)
+    return loadInstances(instancesDir, randSolutions, True)
 
 # Load Falkenauer U dataset of 80 instances
 # The item sizes are uniformly distributed here
-def getFalkenauer(solvedOnly):
+def getFalkenauer():
     instancesDir = Path("./Datasets/Falkenauer_U")
     falkSolutions = Path("./Datasets/Solutions/FalkenauerSolutions.csv")
 
-    return loadInstances(instancesDir, falkSolutions, solvedOnly)
+    return loadInstances(instancesDir, falkSolutions, True)
 
 # Load ANI or AI datasets. These are intentionally difficult instances.
 def getHardInstances(version, solvedOnly):
