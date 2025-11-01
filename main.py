@@ -5,7 +5,7 @@ from algorithms import randomised_best_fit
 done = False
 while not done:
     done = True
-    selection = int(input("Type a number 1-4 "))
+    selection = int(input("Type a number 1-6: "))
 
     if selection == 1:
         instances = load_data.getRandomInstances()
@@ -15,6 +15,11 @@ while not done:
         instances = load_data.getHardInstances(True, True)
     elif selection == 4:
         instances = load_data.getHardInstances(False, False)
+    elif selection == 5:
+        # arguments here correspond to: number of instances, capacity, number of items, distribution type
+        instances = load_data.getOurRandomInstances(20, 100, 100, "n")
+    elif selection == 6:
+        instances = load_data.getOurRandomInstances(20, 100, 100, "u")
     else:
         done = False
 
@@ -30,11 +35,18 @@ for instance in instances:
     packing = randomised_best_fit.randomisedBestFit(instance["bin_capacity"], instance["weights"].copy())
     endTime = time.perf_counter()
 
+    # print(instance["weights"])
+    # print(packing)
+    if sum(packing) - sum(instance["weights"]) != 0:
+        raise Exception("Error: weight of instance differs to that of packing")
+
     totalTime += (endTime - startTime)
 
     opt = instance["optimal_solution"]
     alg = len(packing)
     waste += alg - opt
+    if waste < 0:
+        raise Exception("Error: negative waste, our algorithm is cheating")
     totalOpt += opt
 
     ratioScore += (alg/opt)
