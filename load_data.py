@@ -1,7 +1,10 @@
 from pathlib import Path
 from pathlib import PurePosixPath
+import math
+import numpy as np
 import csv
 
+# Load instances from a specific given dataset
 def loadInstances(instancesDir, solutions, solvedOnly):
 
     sols = {}
@@ -80,5 +83,64 @@ def getHardInstances(version, solvedOnly):
         instancesDir = Path("./Datasets/Difficult_Instances/ANI")
         ANISolutions = Path("./Datasets/Solutions/ANISolutions.csv")
         return loadInstances(instancesDir, ANISolutions, solvedOnly)
+
+
+
+
+# Below are functions for generating a specific number instances with bins set to some capacity and number of items
+# The downside is the optimal won't be known for any
+# At least we can calculate a simple lower bound by doing ceil(total_weight/capacity)
+# The minimum possible weight takes inpiration from the randomly generated dataset from BPPLIB
+
+
+def createNormalDistribution(minimum, maximum, numItems, rng):
+    mean = (maximum + minimum)/2
+
+    normalDist = rng.standard_normal(numItems)
+
+    # We need to find the value with greatest magnitude so we can scale all values into our range accordingly
+    maxVal = 0
+    for val in normalDist:
+        maxVal = max(maxVal, abs(val))
+
+    # The value beyond the mean that 1 in the normalDist corresponds to
+    scale = (maximum - mean)/maxVal
+
+    for x in range(0, len(normalDist)):
+        normalDist[x] = (normalDist[x] * scale) + mean
+
+    return normalDist
+
+
+# Random function information: https://numpy.org/doc/stable/reference/random/index.html#random-quick-start
+def getOurRandomInstances(numInstances, capacity, numItems, distribution):
+
+    instances = []
+
+    rng = np.random.default_rng()
+    for x in range(0, numInstances):
+        instanceInfo = {}
+
+        instanceInfo["number_of_items"] = numItems
+        instanceInfo["bin_capacity"] = capacity
+
+        minMultiplier = rng.integers(10, 31)
+        minimumWeight = (minMultiplier*capacity)/100
+
+        weights = []
+        if distribution == "n":
+            weights = createNormalDistribution(minimumWeight, capacity, numItems, rng) # Normal distribution
+        else:
+            weights = rng.integers(low=minimumWeight, high=(capacity+1), size=numItems) # Uniform distribution
+        weights.sort()
+        weights = (np.round(weights)).astype(int)
+        instanceInfo["weights"] = weights.tolist()
+        totalWeight = sum(instanceInfo["weights"])
+
+        instanceInfo["optimal_solution"] = math.ceil(totalWeight/capacity)
+
+        instances.append(instanceInfo)
+
+    return instances
 
 
