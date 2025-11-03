@@ -1,4 +1,4 @@
-import load_data
+from utilities import load_data
 import time
 from algorithms import randomised_best_fit
 
