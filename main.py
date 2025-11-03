@@ -35,15 +35,18 @@ for instance in instances:
     packing = randomised_best_fit.randomisedBestFit(instance["bin_capacity"], instance["weights"].copy())
     endTime = time.perf_counter()
 
-    # print(instance["weights"])
-    # print(packing)
-    if sum(packing) - sum(instance["weights"]) != 0:
+    print(instance["weights"])
+    print(packing)
+    print()
+
+    totalWeight = sum(packing["bin_weights"])
+    if totalWeight - sum(instance["weights"]) != 0:
         raise Exception("Error: weight of instance differs to that of packing")
 
     totalTime += (endTime - startTime)
 
     opt = instance["optimal_solution"]
-    alg = len(packing)
+    alg = len(packing["bin_weights"])
     waste += alg - opt
     if waste < 0:
         raise Exception("Error: negative waste, our algorithm is cheating")
@@ -53,7 +56,7 @@ for instance in instances:
 
 print("Time: " + str(totalTime))
 print("Total Bins used in optimal case: " + str(totalOpt))
-print("Waste: " + str(waste))
+print("Waste (Excess bins): " + str(waste))
 print("Ratio of bins used by algorithm to bins used in optimal: " +  str((waste + totalOpt)/totalOpt))
 print("Number of instances used: " + str(len(instances)))
 print("Average ratio of bins used by algorithm to bins used in optimal case: " + str(ratioScore/len(instances)))
