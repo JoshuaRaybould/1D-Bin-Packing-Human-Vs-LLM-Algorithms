@@ -1,7 +1,10 @@
 from utilities import load_data
 from utilities import test_correctness
 import time
-from algorithms import randomised_best_fit
+from algorithms import randomised_best_fit, simulated_annealing
+
+algorithmOptions = [randomised_best_fit.randomisedBestFit, simulated_annealing.simulatedAnnealingFF, simulated_annealing.simulatedAnnealingFFD]
+chosenAlgorithm = algorithmOptions[1]
 
 test = False
 done = False
@@ -30,18 +33,19 @@ while not done:
 
 
 if test:
-    if test_correctness.testAlgorithmCorrectness(randomised_best_fit.randomisedBestFit, instances):
+    if test_correctness.testAlgorithmCorrectness(chosenAlgorithm, instances):
         print("Seems to be correct")
 else:
     ratioScore = 0
     waste = 0
     totalOpt = 0
     totalTime = 0
+
     for instance in instances:
         # Decision to use time.perf_counter() was due to https://builtin.com/articles/timing-functions-python
         # time.time() is apparently not as precise and timeit is generally for small bits of code
         startTime = time.perf_counter()
-        packing = randomised_best_fit.randomisedBestFit(instance["bin_capacity"], instance["weights"].copy())
+        packing = chosenAlgorithm(instance["bin_capacity"], instance["weights"].copy())
         endTime = time.perf_counter()
 
         # print(instance["weights"])
