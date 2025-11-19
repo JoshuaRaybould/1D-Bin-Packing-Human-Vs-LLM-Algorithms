@@ -1,10 +1,10 @@
 from utilities import load_data
 from utilities import test_correctness
 import time
-from algorithms import randomised_best_fit, simulated_annealing
+from algorithms import randomised_best_fit, simulated_annealing, grouping_genetic_algorithm
 
-algorithmOptions = [randomised_best_fit.randomisedBestFit, simulated_annealing.simulatedAnnealingFF, simulated_annealing.simulatedAnnealingFFD]
-chosenAlgorithm = algorithmOptions[1]
+algorithmOptions = [randomised_best_fit.randomisedBestFit, simulated_annealing.simulatedAnnealingFF, simulated_annealing.simulatedAnnealingFFD, grouping_genetic_algorithm.groupingGeneticAlgorithm]
+chosenAlgorithm = algorithmOptions[3]
 
 test = False
 done = False
