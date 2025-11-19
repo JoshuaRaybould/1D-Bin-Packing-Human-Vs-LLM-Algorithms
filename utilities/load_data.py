@@ -59,16 +59,16 @@ def loadInstances(instancesDir, solutions, solvedOnly):
 
 # Load the dataset of Random Generated instances
 def getRandomInstances():
-    instancesDir = Path("./Datasets/Randomly_Generated")
-    randSolutions = Path("./Datasets/Solutions/RandomInstanceSolutions.csv")
+    instancesDir = Path("./Instances/Randomly_Generated")
+    randSolutions = Path("./Instances/Solutions/RandomInstanceSolutions.csv")
 
     return loadInstances(instancesDir, randSolutions, True)
 
 # Load Falkenauer U dataset of 80 instances
 # The item sizes are uniformly distributed here
 def getFalkenauer():
-    instancesDir = Path("./Datasets/Falkenauer_U")
-    falkSolutions = Path("./Datasets/Solutions/FalkenauerSolutions.csv")
+    instancesDir = Path("./Instances/Falkenauer_U")
+    falkSolutions = Path("./Instances/Solutions/FalkenauerSolutions.csv")
 
     return loadInstances(instancesDir, falkSolutions, True)
 
@@ -76,12 +76,12 @@ def getFalkenauer():
 def getHardInstances(version, solvedOnly):
     # True for AI, False for ANI
     if version:
-        instancesDir = Path("./Datasets/Difficult_Instances/AI")
-        AISolutions = Path("./Datasets/Solutions/AISolutions.csv")
+        instancesDir = Path("./Instances/Difficult_Instances/AI")
+        AISolutions = Path("./Instances/Solutions/AISolutions.csv")
         return loadInstances(instancesDir, AISolutions, solvedOnly)
     else:
-        instancesDir = Path("./Datasets/Difficult_Instances/ANI")
-        ANISolutions = Path("./Datasets/Solutions/ANISolutions.csv")
+        instancesDir = Path("./Instances/Difficult_Instances/ANI")
+        ANISolutions = Path("./Instances/Solutions/ANISolutions.csv")
         return loadInstances(instancesDir, ANISolutions, solvedOnly)
 
 
