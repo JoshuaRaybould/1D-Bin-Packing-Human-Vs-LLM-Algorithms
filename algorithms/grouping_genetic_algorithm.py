@@ -1,5 +1,16 @@
 import random
 import math
+import random
+import copy
+
+def doesEncodingMakeSense(encoding, groupIndex):
+    for x in range(0, len(encoding["encoding"])):
+        itemGroup = encoding["encoding"][x]
+        if itemGroup != -1 and x not in encoding["bin_groups"][itemGroup]:
+            print("TROUBLE")
+            print(groupIndex)
+            print(encoding)
+            break
 
 def randomisedFirstFitEncoded(binCapacity, weights):
     binGroups = {}
@@ -24,15 +35,10 @@ def randomisedFirstFitEncoded(binCapacity, weights):
                 binGroups[b].append(index)
                 packed = True
                 break
-        #print(binGroups)
-        #print(encoding)
+
         if not packed:
             encoding[index] = len(binGroups)
             binGroups[len(binGroups)] = [index]
-
-    #print("COOL")
-    #for x in range(0, len(binGroups)):
-        #print(binGroups[x])
     fullEncoding = {}
     fullEncoding["encoding"] = encoding
     fullEncoding["bin_groups"] = binGroups
@@ -47,32 +53,21 @@ def tournamentSelect(population, fitness):
             c1 = c2
     return c1
 
-def crossover(parent1, parent2):
-    # 2 point crossover
-    s = random.randint(0, len(parent1["bin_groups"]))
-    e = random.randint(0, len(parent1["bin_groups"]))
-    if e < s:
-        tmp = s
-        s = e
-        e = tmp
+def getFirstUnusedGroupIndex(child):
+    i = 0
+    while True:
+        if i not in child["bin_groups"]:
+            return i
+        i += 1
 
-    # We want to take the groups from index s to e in parent 1 and swap them with those groups in parent2
-
-    return [parent1, parent2]
-
-def firstFitDecreasing(child, unassignedItems, weights, binCapacity, removedLabel):
+def firstFitDecreasing(child, unassignedItems, weights, binCapacity):
     itemWeightPairs = []
     for unassignedItem in unassignedItems:
         pair = [weights[unassignedItem], unassignedItem]
         itemWeightPairs.append(pair)
-    print(itemWeightPairs)
-    #print("unassigned items: ")
-    #print(unassignedItems)
-    #print("itemWeightPairs ")
-    #print(itemWeightPairs)
+
     # https://stackoverflow.com/questions/25432182/sorting-an-array-of-arrays-in-python
     itemWeightPairs = sorted(itemWeightPairs, key=lambda x: x[0], reverse=True)
-    #print(itemWeightPairs)
 
     for i in range(0, len(itemWeightPairs)):
         packed = False
@@ -86,18 +81,137 @@ def firstFitDecreasing(child, unassignedItems, weights, binCapacity, removedLabe
             if binWeight + weights[itemIndex] <= binCapacity:
                 child["encoding"][itemIndex] = groupIndex
                 child["bin_groups"][groupIndex].append(itemIndex)
-                print("We packed")
                 packed = True
                 break
 
         if not packed:
-            print("We opened new bin")
-            child["encoding"][itemIndex] = removedLabel
-            child["bin_groups"][removedLabel] = [itemIndex]
+            label = getFirstUnusedGroupIndex(child)
+            child["encoding"][itemIndex] = label
+            child["bin_groups"][label] = [itemIndex]
 
     return child
 
+def fillGroup(parent1, parent2Groups, unassignedItems1):
+    # Fill group back up
+    #print("WE ARE STARTING ONE HERE")
+    #print("______________________________________")
+    #print("--------------------------------------")
+    #print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+    #print("PARENT1")
+    #print(parent1)
+    #print(parent2)
+    #print("parent 2 groups")
+    #print(parent2Groups)
+    #print("unassigned items")
+    #print(unassignedItems1)
+    doesEncodingMakeSense(parent1, -3)
+    for groupIndex in parent2Groups:
+        # We need to go through every single value in the groups and assign if unassigned, or change bin
+        #print("1st")
+        #print("-----------------")
+        #print("-----------------")
+        #print(parent1)
+        doesEncodingMakeSense(parent1, -1)
+        for item in parent2Groups[groupIndex]:
+            itemCurrentGroup = parent1["encoding"][item]
+            #print("12st")
+            if itemCurrentGroup == -1:
+                unassignedItems1.remove(item)
+                parent1["encoding"][item] = groupIndex
+            else:
+                #if item not in parent1["bin_groups"][itemCurrentGroup]:
+                   #print("The parent")
+                   #print(parent1)
+                   #print("THE Item: " + str(item))
+                   #print("THE Group: " + str(itemCurrentGroup))
+                parent1["bin_groups"][itemCurrentGroup].remove(item)
+                if not parent1["bin_groups"][itemCurrentGroup]:
+                    parent1["bin_groups"].pop(itemCurrentGroup)
+                parent1["encoding"][item] = groupIndex
 
+        parent1["bin_groups"][groupIndex] = parent2Groups[groupIndex]
+        doesEncodingMakeSense(parent1, groupIndex)
+
+def crossover(parent1, parent2, weights, binCapacity):
+    # 2 point crossover
+    doesEncodingMakeSense(parent1, -10)
+    doesEncodingMakeSense(parent2, -10)
+
+    s = random.randint(0, len(parent1["bin_groups"]))
+    e = random.randint(0, len(parent1["bin_groups"]))
+    if e < s:
+        tmp = s
+        s = e
+        e = tmp
+    prefE = s + random.randint(0, 4)
+    e = min(e, prefE)
+
+    # We want to take the groups from index s to e in parent 1 and swap them with those groups in parent2
+    # Note, doesn't necessarily correspond to groups labelled s, s+1 ... e
+    parent1Groups = {}
+    parent2Groups = {}
+    groupsToCheck = []
+
+    # We also need to unassign every item which are in these groups for each
+    unassignedItems1 = []
+    unassignedItems2 = []
+    i = 0
+
+    for groupIndex in parent1["bin_groups"]:
+        if i >=s and i <= e:
+            groupsToCheck.append(groupIndex)
+            parent1Groups[groupIndex] = parent1["bin_groups"][groupIndex].copy()
+
+            for item in parent1Groups[groupIndex]:
+                unassignedItems1.append(item)
+                parent1["encoding"][item] = -1 # Stands for unassigned
+        i += 1
+    #doesEncodingMakeSense(parent1)
+    #doesEncodingMakeSense(parent2)
+
+    for groupIndex in groupsToCheck:
+        parent1["bin_groups"].pop(groupIndex)
+        if groupIndex in parent2["bin_groups"]:
+            parent2Groups[groupIndex] = parent2["bin_groups"][groupIndex].copy()
+
+            for item in parent2Groups[groupIndex]:
+                unassignedItems2.append(item)
+                parent2["encoding"][item] = -1 # Stands for unassigned
+            parent2["bin_groups"].pop(groupIndex)
+    #doesEncodingMakeSense(parent1)
+    #doesEncodingMakeSense(parent2)
+    #print("Group range")
+    #print(s)
+    #print(e)
+    #print("parent1")
+    #print(parent1)
+    #print("parent2")
+    #print(parent2)
+    """print("The parent1")
+    print(parent1)
+    print("Unassigned 1")
+    print(unassignedItems1)
+    print("parent 2")
+    print(parent2)
+    print("unassgned 2")
+    print(unassignedItems2)
+    time.sleep(5)"""
+    # Fill in parent 1 with the groups from parent 2, then assign unassigned items
+    fillGroup(parent1, parent2Groups, unassignedItems1)
+    #print("PARENT 2 PARENT 2 11111111111")
+    #print(parent2)
+    firstFitDecreasing(parent1, unassignedItems1, weights, binCapacity)
+    #print("PARENT 2 PARENT 2")
+    #print(parent2)
+    # Do the same for parent2
+    fillGroup(parent2, parent1Groups, unassignedItems2)
+    firstFitDecreasing(parent2, unassignedItems2, weights, binCapacity)
+
+    #print("SHEESH")
+    #doesEncodingMakeSense(parent1)
+    #doesEncodingMakeSense(parent2)
+
+    return [parent1, parent2]
 
 def mutate(child, weights, binCapacity):
     unassignedItems = []
@@ -110,44 +224,48 @@ def mutate(child, weights, binCapacity):
 
     # Pick a bin at random to remove, we then run FFD to put the items back into groups
     b = random.randint(0, len(child["bin_groups"]))
-    # print(b)
+
     # We eliminate the bth group, not necessarily corresponding to a group labelled b
     i = 0
-    removedLabel = -1
     for groupIndex in child["bin_groups"]:
         if i == b:
-            removedLabel = groupIndex
-            #print("bingroups")
-            #print(b)
-            #print(child["bin_groups"])
             unassignedItems = child["bin_groups"].pop(groupIndex)
-            #print(child["bin_groups"])
-            #print("end")
             break
         i += 1
 
-    child = firstFitDecreasing(child, unassignedItems, weights, binCapacity, removedLabel)
+    child = firstFitDecreasing(child, unassignedItems, weights, binCapacity)
 
     mutateEndWeight = 0
     for groupIndex in child["bin_groups"]:
         for j in child["bin_groups"][groupIndex]:
             mutateEndWeight += weights[j]
 
-    if mutateStartWeight != mutateEndWeight:
-        print("WELLLLLL")
-        print(unassignedItems)
-        print(mutateStartWeight)
-        print(mutateEndWeight)
-        print(child)
-        for item in unassignedItems:
-            print(weights[item])
-
     return child
 
+def scoreFitnesses(weights, population, fitness):
+   # We use the same fitness function as in our simulated annealing implementation
+   # The sum of the squares of each bin's weight
+   best = 0
+   bestFitness = float("inf")
+   for x in range(0, len(population)):
+      fitness[x] = 0
+      # Iterate through groups
+      groups = population[x]["bin_groups"]
+      for groupIndex in groups:
+            binWeight = 0
+
+            for item in groups[groupIndex]:
+               binWeight += weights[item]
+
+            fitness[x] += binWeight * binWeight
+      if fitness[x] > bestFitness:
+            best = x
+            bestFitness = fitness[x]
+
+   return best
 
 
 def groupingGeneticAlgorithm(binCapacity, weights):
-    itemChormosomeLen = len(weights)
     populationSize = 20
     population = []
 
@@ -159,30 +277,14 @@ def groupingGeneticAlgorithm(binCapacity, weights):
     bestFitness = float("inf")
     i = 0
     lowerBound = math.ceil(sum(weights)/binCapacity)
-    while i < 100 and bestFitness > lowerBound:
+    while i < 25 and bestFitness > lowerBound:
         i += 1
-        #print("ok")
+
         # We use the same fitness function as in our simulated annealing implementation
         # The sum of the squares of each bin's weight
         fitness = {}
-        for x in range(0, len(population)):
-            fitness[x] = 0
-            # Iterate through groups
-            groups = population[x]["bin_groups"]
-            for groupIndex in groups:
-                binWeight = 0
-
-                for item in groups[groupIndex]:
-                    binWeight += weights[item]
-                #print(population[x])
-                #print(groups)
-                #print("A Group")
-                #print(g)
-                #print()
-                fitness[x] += binWeight * binWeight
-            if fitness[x] > bestFitness:
-                best = x
-                bestFitness = fitness[x]
+        best = scoreFitnesses(weights, population, fitness)
+        bestFitness = fitness[best]
 
         newPopulation = []
         newPopulation.append(population[best]) # Save the best packing we've found so far
@@ -193,20 +295,29 @@ def groupingGeneticAlgorithm(binCapacity, weights):
             parent2Index = tournamentSelect(population, fitness)
 
             # Crossover
-            children = crossover(population[parent1Index].copy(), population[parent2Index].copy())
-
+            # Crossover is expensive so we are going to do it 10% of the time
+            prob = random.random()
+            """if parent1Index != parent2Index and prob > 0.9:
+               children = crossover(copy.deepcopy(population[parent1Index]), copy.deepcopy(population[parent2Index]), weights, binCapacity)
+            else:
+                children = [copy.deepcopy(population[parent1Index]), copy.deepcopy(population[parent2Index])]"""
             # Mutation
+            children = [population[parent1Index], population[parent2Index]]
             child1 = mutate(children[0], weights, binCapacity)
             child2 = mutate(children[1], weights, binCapacity)
 
             newPopulation.append(child1)
             newPopulation.append(child2)
+            #doesEncodingMakeSense(child1, -2)
+            #doesEncodingMakeSense(child1, -2)
+        population = newPopulation
 
     # Convert from encoding back to normal
     bins = {}
     bins["packing"], bins["bin_weights"] = [], []
     # Iterate through all groups/bins in the best solution
-    bestSolGroups = population[0]["bin_groups"]
+    best = scoreFitnesses(weights, population, fitness)
+    bestSolGroups = population[best]["bin_groups"]
     for groupIndex in bestSolGroups:
         bins["packing"].append([])
         bins["bin_weights"].append(0)
