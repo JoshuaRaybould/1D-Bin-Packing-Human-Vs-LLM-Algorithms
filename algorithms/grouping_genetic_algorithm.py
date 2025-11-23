@@ -2,6 +2,7 @@ import random
 import math
 import random
 import copy
+import pickle
 
 def doesEncodingMakeSense(encoding, groupIndex):
     for x in range(0, len(encoding["encoding"])):
@@ -237,7 +238,7 @@ def groupingGeneticAlgorithm(binCapacity, weights):
     bestFitness = float("inf")
     i = 0
     lowerBound = math.ceil(sum(weights)/binCapacity)
-    while i < 25 and bestFitness > lowerBound:
+    while i < 60 and bestFitness > lowerBound:
         i += 1
 
         # We use the same fitness function as in our simulated annealing implementation
@@ -258,10 +259,11 @@ def groupingGeneticAlgorithm(binCapacity, weights):
             # Crossover is expensive so we are going to do it 10% of the time
             prob = random.random()
             if parent1Index != parent2Index and prob > 0.9:
-               children = crossover(copy.deepcopy(population[parent1Index]), copy.deepcopy(population[parent2Index]), weights, binCapacity)
+                # https://stackoverflow.com/questions/24756712/deepcopy-is-extremely-slow
+                children = crossover(pickle.loads(pickle.dumps(population[parent1Index], -1)), pickle.loads(pickle.dumps(population[parent2Index], -1)), weights, binCapacity)
             else:
-                children = [copy.deepcopy(population[parent1Index]), copy.deepcopy(population[parent2Index])]
-            # children = [population[parent1Index], population[parent2Index]]
+                children = [pickle.loads(pickle.dumps(population[parent1Index], -1)), pickle.loads(pickle.dumps(population[parent2Index], -1))]
+            #children = [pickle.loads(pickle.dumps(population[parent1Index], -1)), pickle.loads(pickle.dumps(population[parent2Index], -1))]
 
             # Mutation
             child1 = mutate(children[0], weights, binCapacity)
