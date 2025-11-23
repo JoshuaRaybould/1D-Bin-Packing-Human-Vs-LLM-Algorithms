@@ -1,10 +1,10 @@
 from utilities import load_data
 from utilities import test_correctness
 import time
-from algorithms import randomised_best_fit, simulated_annealing
+from algorithms import randomised_best_fit, simulated_annealing, grouping_genetic_algorithm
 
-algorithmOptions = [randomised_best_fit.randomisedBestFit, simulated_annealing.simulatedAnnealingFF, simulated_annealing.simulatedAnnealingFFD]
-chosenAlgorithm = algorithmOptions[1]
+algorithmOptions = [randomised_best_fit.randomisedBestFit, simulated_annealing.simulatedAnnealingFF, simulated_annealing.simulatedAnnealingFFD, grouping_genetic_algorithm.groupingGeneticAlgorithm]
+chosenAlgorithm = algorithmOptions[3]
 
 test = False
 done = False
@@ -24,7 +24,7 @@ while not done:
         # arguments here correspond to: number of instances, capacity, number of items, distribution type
         instances = load_data.getOurRandomInstances(20, 100, 100, "n")
     elif selection == 6:
-        instances = load_data.getOurRandomInstances(20, 100, 100, "u")
+        instances = load_data.getOurRandomInstances(15, 100, 100, "u")
     elif selection == 7:
         instances = load_data.getRandomInstances()
         test = True
@@ -62,6 +62,11 @@ else:
         alg = len(packing["bin_weights"])
         waste += alg - opt
         if waste < 0:
+            print(instance["bin_capacity"])
+            print(packing["bin_weights"])
+            print(packing["packing"])
+            print(instance["optimal_solution"])
+            #print(instance[])
             raise Exception("Error: negative waste, our algorithm is cheating")
         totalOpt += opt
 
