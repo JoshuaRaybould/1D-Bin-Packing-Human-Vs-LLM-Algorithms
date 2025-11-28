@@ -2,7 +2,7 @@ import math
 import random
 from . import first_fit
 
-# Decreasing is to dcide whether to use first fit with or without putting the data in decreasing order first
+# Decreasing is to decide whether to use first fit with or without putting the data in decreasing order first
 def simulatedAnnealing(binCapacity, weights, decreasing):
 
     temperature = 100000
@@ -40,7 +40,9 @@ def simulatedAnnealing(binCapacity, weights, decreasing):
 
             if newJBinWeight <= binCapacity and newIBinWeight <= binCapacity:
                 tweaked = True
-                scoreChange = (newJBinWeight*newJBinWeight + newIBinWeight*newIBinWeight) - (jBinWeight*jBinWeight + iBinWeight*iBinWeight)
+                new = newJBinWeight*newJBinWeight + newIBinWeight*newIBinWeight
+                original = jBinWeight*jBinWeight + iBinWeight*iBinWeight
+                scoreChange = new - original
 
                 # If for example we get probability 0.6, we want a 60% chance of accepting, so we generate a random number from 0 to 1 and compare them.
                 if (scoreChange < 0):
@@ -70,8 +72,8 @@ def simulatedAnnealing(binCapacity, weights, decreasing):
             if newJBinWeight <= binCapacity:
                 tweaked = True
                 new = newJBinWeight*newJBinWeight + newIBinWeight*newIBinWeight
-                og = jBinWeight*jBinWeight + iBinWeight*iBinWeight
-                scoreChange = (newJBinWeight*newJBinWeight + newIBinWeight*newIBinWeight) - (jBinWeight*jBinWeight + iBinWeight*iBinWeight)
+                original = jBinWeight*jBinWeight + iBinWeight*iBinWeight
+                scoreChange = new - original
                 scoreChange = scoreChange/(binCapacity)
 
                 # If for example we get probability 0.6, we want a 60% chance of accepting, so we generate a random number from 0 to 1 and compare them.
@@ -79,7 +81,7 @@ def simulatedAnnealing(binCapacity, weights, decreasing):
                     probability = math.exp(scoreChange/ temperature)
                     generatedVal = random.random()
                 if scoreChange >= 0 or generatedVal < probability:
-                    #print("WE did move tho")
+                    #print("We did move")
                     # Move the item
                     candidateSolution["packing"][i].remove(valToMove)
                     candidateSolution["bin_weights"][i] -= valToMove
