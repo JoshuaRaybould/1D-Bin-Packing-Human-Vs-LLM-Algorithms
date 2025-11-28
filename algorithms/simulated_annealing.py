@@ -43,6 +43,8 @@ def simulatedAnnealing(binCapacity, weights, decreasing):
                 new = newJBinWeight*newJBinWeight + newIBinWeight*newIBinWeight
                 original = jBinWeight*jBinWeight + iBinWeight*iBinWeight
                 scoreChange = new - original
+                scoreChange = scoreChange/(binCapacity)
+                
 
                 # If for example we get probability 0.6, we want a 60% chance of accepting, so we generate a random number from 0 to 1 and compare them.
                 if (scoreChange < 0):
