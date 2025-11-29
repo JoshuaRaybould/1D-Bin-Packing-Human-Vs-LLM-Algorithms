@@ -9,6 +9,10 @@ def simulatedAnnealing(binCapacity, weights, decreasing):
     candidateSolution = first_fit.firstFit(binCapacity, weights, decreasing)
 
     #print(len(candidateSolution["bin_weights"]))
+    """num1s = 0
+    num2s = 0
+    acc1s = 0
+    acc2s = 0"""
 
     # We can use the lower bound as a way to check if we have arrived at the ideal solution (though it may not be achievable)
     lowerBound = math.ceil(sum(weights)/binCapacity)
@@ -27,8 +31,10 @@ def simulatedAnnealing(binCapacity, weights, decreasing):
         # Randomly decide the type of tweak to apply
         choice = random.randint(1,2)
 
+      
         tweaked = False
         if choice == 1:
+            #num1s += 1
             # If possible, swap a pair of items in bin i and j
             iValToSwap = random.choice(candidateSolution["packing"][i])
             jValToSwap = random.choice(candidateSolution["packing"][j])
@@ -39,6 +45,7 @@ def simulatedAnnealing(binCapacity, weights, decreasing):
             newIBinWeight = iBinWeight - iValToSwap + jValToSwap
 
             if newJBinWeight <= binCapacity and newIBinWeight <= binCapacity:
+                #acc1s += 1
                 tweaked = True
                 new = newJBinWeight*newJBinWeight + newIBinWeight*newIBinWeight
                 original = jBinWeight*jBinWeight + iBinWeight*iBinWeight
@@ -63,6 +70,7 @@ def simulatedAnnealing(binCapacity, weights, decreasing):
                     candidateSolution["bin_weights"][j] += iValToSwap
 
         elif choice == 2:
+            #num2s += 1
             # If possible, move an item from bin i to bin j
             valToMove = random.choice(candidateSolution["packing"][i])
 
@@ -72,6 +80,7 @@ def simulatedAnnealing(binCapacity, weights, decreasing):
             newJBinWeight = jBinWeight + valToMove
 
             if newJBinWeight <= binCapacity:
+                #acc2s += 1
                 tweaked = True
                 new = newJBinWeight*newJBinWeight + newIBinWeight*newIBinWeight
                 original = jBinWeight*jBinWeight + iBinWeight*iBinWeight
@@ -100,6 +109,12 @@ def simulatedAnnealing(binCapacity, weights, decreasing):
             temperature = temperature * 0.995
 
     #print(len(candidateSolution["bin_weights"]))
+    """print("start")
+    print(num1s)
+    print(num2s)
+    print(acc1s)
+    print(acc2s)
+    print("end")"""
     return candidateSolution
 
 def simulatedAnnealingFFD(binCapacity, weights):
