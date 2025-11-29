@@ -142,6 +142,16 @@ When it comes to crossover we use two point crossover, where you pick a start an
 
 \subsubsection{Time Complexity}
 
+\subsection{Ant Colony Optimisation}
+
+\subsubsection{Overview}
+
+The first use of ACO was under the name Ant System (AS) and was used for the travelling salesman problem (TSP) though its effectiveness was limited to small instances. There have also been many improvements to the algorithm over time, e.g. Elitist AS, MAX-MIN AS (MMAS) and Rank-based AS to name a few, which make it very competitive. 
+
+Ant Colony Optimisation (ACO) is a popular metaheuristic for combinatorial optimisation. Whilst in realilty it is only very loosely based on actual ant behaviour it was inspired by it. Real ants leave behind pheromones when travelling, which other ants will follow. If we provide ants with two different paths between their nest and a specific food source, whilst at first their behaviour is random, over time they tend towards the short path. This is because those which pick the short path will arrive back at the nest first, and so there will be more pheromones on the short path. The ants then become much more likely to pick the short path due to the higher level of pheromone, which in turn leads to more pheromone and so eventually the entire colony picks the short path. 
+
+\subsubsection{implementation}
+
 \section{Comparison}
 
 \begin{thebibliography}{00}
