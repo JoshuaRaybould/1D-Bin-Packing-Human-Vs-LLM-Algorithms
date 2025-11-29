@@ -1,9 +1,9 @@
 from utilities import load_data
 from utilities import test_correctness
 import time
-from algorithms import randomised_best_fit, simulated_annealing, grouping_genetic_algorithm
+from algorithms import randomised_best_fit, simulated_annealing, grouping_genetic_algorithm, tabu_search
 
-algorithmOptions = [randomised_best_fit.randomisedBestFit, simulated_annealing.simulatedAnnealingFF, simulated_annealing.simulatedAnnealingFFD, grouping_genetic_algorithm.groupingGeneticAlgorithm]
+algorithmOptions = [randomised_best_fit.randomisedBestFit, simulated_annealing.simulatedAnnealingFF, simulated_annealing.simulatedAnnealingFFD, tabu_search.tabuSearchFF, tabu_search.tabuSearchFFD, grouping_genetic_algorithm.groupingGeneticAlgorithm]
 chosenAlgorithm = algorithmOptions[3]
 
 test = False

@@ -1,7 +1,6 @@
 import random
 import math
 import random
-import copy
 import pickle
 
 def doesEncodingMakeSense(encoding, groupIndex):
@@ -177,10 +176,10 @@ def crossover(parent1, parent2, weights, binCapacity):
 def mutate(child, weights, binCapacity):
     unassignedItems = []
 
-    mutateStartWeight = 0
+    """mutateStartWeight = 0
     for groupIndex in child["bin_groups"]:
         for j in child["bin_groups"][groupIndex]:
-            mutateStartWeight += weights[j]
+            mutateStartWeight += weights[j]"""
 
 
     # Pick a bin at random to remove, we then run FFD to put the items back into groups
@@ -196,10 +195,10 @@ def mutate(child, weights, binCapacity):
 
     child = firstFitDecreasing(child, unassignedItems, weights, binCapacity)
 
-    mutateEndWeight = 0
+    """mutateEndWeight = 0
     for groupIndex in child["bin_groups"]:
         for j in child["bin_groups"][groupIndex]:
-            mutateEndWeight += weights[j]
+            mutateEndWeight += weights[j]"""
 
     return child
 

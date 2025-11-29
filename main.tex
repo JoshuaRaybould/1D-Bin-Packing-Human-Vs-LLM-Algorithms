@@ -113,6 +113,16 @@ Moreover, we need to define the general parameters present in simulated annealin
 
 First we obtain the initial candidate solution with FFD, this requires O(nlogn) for sorting the items in reverse order, then first fit is carried out. There are n items and in the worst case for each item no open bin can hold it and so it will check n/2 bins on average before opening a new one, giving O(n * n/2). Then simulated annealing begins (TODO: how is this going to work?)
 
+\subsection{Tabu Search}
+
+\subsubsection{Overview}
+
+Tabu search was proposed to help tackle the problem of local search methods getting stuck in local optima. It is effectively a local search, working similarly to hill climbing except it stores the best solution found so far and maintains a list of recently visited candidate solutions. This list is called the tabu list and solutions in it cannot be returned to. Provided a sufficiently large list this means if a local optimum is reached then the algorithm will move away from it and be unable to return to it. This allows the algorithm to explore the space more, giving greater opportunity to find stronger solutions. 
+
+\subsubsection{Implementation}
+
+We use FFD to obtain the initial candidate solution as we do in our simulated annealing implementation and also use the same objective function. Tweaking our solution to obtain a neighbouring one is also done similarly here; we pick 2 random bins and then either swap two random items between them or move a random item from one to the other. A slight difference here is that when moving a single item 60\% of the time we move it from the least full bin (lowest weight), since it is much more likely to become empty, so is likely to lead to a strong neighbour (this is true in practice). The idea of targeting a specific bin comes from \cite{lodi}. We carry out 10,000 iterations and during each generate 40 neighbours and select the best which doesn’t violate our tabu list. Note that this can lead to a worse solution, but we ensure we always have the best found solution stored. We set the tabu list to have a length of 8, as setting it greater than this led to no benefit but slowed the algorithm. Rather than storing entire solutions in the tabu list, we store the bins that were changed to prevent them from returning to that configuration. This has a very similar effect but is less computationally intensive than storing the entire solution. The tabu list is ignored only in the case that a bin can be eliminated, that is to say a bin can return to a previous configuration provided this allows for the removal of a bin. 
+
 \subsection{Grouping Genetic Algorithm}
 
 \subsubsection{Overview}
@@ -158,6 +168,8 @@ When it comes to crossover we use two point crossover, where you pick a start an
 \bibitem{sonuc} Sonuç, E., Şen, B. and Bayır, Ş., 2017. Solving Bin Packing Problem Using Simulated Annealing. In: Proceedings of the 65th ISERD International Conference, Mecca, Saudi Arabia, 23–24 January 2017. World Research Library, pp. 83–85. \url{https://worldresearchlibrary.org/up\_proc/pdf/635-148739346283-85.pdf}
 
 \bibitem{kryz} Krzysztof Fleszar, Khalil S. Hindi, New heuristics for one-dimensional bin-packing, Computers \& Operations Research, Volume 29, Issue 7, 2002, Pages 821-839, ISSN 0305-0548, \url{https://doi.org/10.1016/S0305-0548(00)00082-4}.
+
+\bibitem{lodi} Lodi, A., Martello, S. \& Vigo, D. TSpack: A Unified Tabu Search Code for Multi-Dimensional Bin Packing Problems. Ann Oper Res 131, 203–213 (2004). \url{https://doi.org/10.1023/B:ANOR.0000039519.03572.08}
 
 \bibitem{algafter} Algorithm Afternoon, n.d. Chapter 2: Temperature and Cooling Schedules. In: Simulated Annealing Afternoon: A Practical Guide for Software Developers. AlgorithmAfternoon.com. Available at: \url{https://algorithmafternoon.com/books/simulated\_annealing/chapter02/}
 
