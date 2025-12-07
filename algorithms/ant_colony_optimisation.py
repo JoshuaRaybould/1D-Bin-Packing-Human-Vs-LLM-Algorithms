@@ -49,10 +49,10 @@ def updatePheromones(solution, fitness, pheromoneScores):
                pheromoneScores[(bin[x], bin[y])] += fitness
 
 def antColonyOptimisation(binCapacity, weights):
-   populationSize = 20 # Number of "ant trails"
+   populationSize = math.ceil(len(weights) * 0.8) # Number of "ant trails"
    evaporationParameter = 0.95
-   heuristicImportance = 1
-   pheromoneImportance = 2
+   heuristicImportance = 2
+   pheromoneImportance = 5
    numItems = len(weights)
    
    iterationsBetweenGlobalReinforcement = math.ceil(500/numItems)
@@ -121,8 +121,7 @@ def antColonyOptimisation(binCapacity, weights):
    for group in bestSolutionSoFar:
       bins["packing"].append(group)
       bins["bin_weights"].append(sum(group))
-   print(binCapacity)
-   print(bins["packing"])
+
    return bins
    
 
