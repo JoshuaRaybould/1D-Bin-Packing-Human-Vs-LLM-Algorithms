@@ -63,8 +63,8 @@ This project aims to compare a variety of randomised algorithms on the 1D offlin
     \item How do a wide variety of randomised algorithms for the BPP compare in empirical performance on a variety of different instances? This will serve as a strong starting point for researchers interested in this area whilst also giving insight into how the algorithms perform in practice. 
     \item How effective are LLMs at producing correct and performant code for this kind of problem? Depending on this, we can then suggest ways in which LLMs can be used as tools when designing and implementing such algorithms. 
     \item To what degree does the performance of different LLMs vary and is there an underlying pattern in their shortcomings? Performance here includes both efficiency and correctness. Understanding their limitations will allow users to make more informed decisions when using them in general. 
+    \item How does LLM generated code compare to human written code in terms of readability and maintainability? Examining this provides insight into whether their implementations are understandable and can be learned from.
 \end{enumerate}
-
 
 \section{Comparison Criteria}
 
@@ -72,7 +72,7 @@ This project aims to compare a variety of randomised algorithms on the 1D offlin
 The main comparison here will be between the randomised algorithms I create, here I will define exactly how the algorithms will be compared with one another. Where possible, results will be presented using graphs.
 
 \subsubsection{Metrics}
-Generally, with algorithms, the first performance measures which come to mind are time and space complexities. These ideas are of importance and will be used where possible but as we are dealing with randomised algorithms it may be less meaningful so it will be useful to obtain empirical data too. Moreover, randomised algorithms do not arrive at exact solutions, as such, measuring how good the algorithm solutions are is arguably the most important metric. A further measure of interest is the complexity of the code. 
+Generally, with algorithms, the first performance measures which come to mind are time and space complexities. Space complexity is not so relevant but time complexity is of importance and will be used where possible. As we are dealing with randomised algorithms this may be less meaningful so it will be useful to obtain empirical data too. Moreover, randomised algorithms do not arrive at exact solutions, as such, measuring how good the algorithm solutions are is arguably the most important metric. A further measure of interest is the complexity of the code. 
 
 \subsubsection{Time}
 Where possible, it makes sense to determine time complexity. I will also run each algorithm many times on the inputs to determine the mean runtime. By carrying this out for a variety of input sizes we can get a better view of each algorithms behaviour and determine when it is best applied. It may also be interesting to determine how consistent the runtime is. 
@@ -158,7 +158,7 @@ When it comes to crossover we use two point crossover, where you pick a start an
 
 \subsubsection{Overview}
 
-The first use of ACO was under the name Ant System (AS) and was used for the travelling salesman problem (TSP) though its effectiveness was limited to small instances. There have also been many improvements to the algorithm over time, e.g. Elitist AS, MAX-MIN AS (MMAS) and Rank-based AS to name a few, which make it very competitive, as noted by Levine (\cite{levine}).  
+The first use of ACO was under the name Ant System (AS) and was used for the travelling salesman problem (TSP) though its effectiveness was limited to small instances. There have also been many improvements to the algorithm over time, e.g. Elitist AS, MAX-MIN AS (MMAS) (see \cite{stuetzle}) and Rank-based AS to name a few, which make it very competitive, as noted by Levine (\cite{levine}).  
 
 Ant Colony Optimisation (ACO) is a popular metaheuristic for combinatorial optimisation. Whilst in realilty it is only very loosely based on actual ant behaviour it was inspired by it. Real ants leave behind pheromones when travelling, which other ants will follow. If we provide ants with two different paths between their nest and a specific food source, whilst at first their behaviour is random, over time they tend towards the short path. This is because those which pick the short path will arrive back at the nest first, and so there will be more pheromones on the short path. The ants then become much more likely to pick the short path due to the higher level of pheromone, which in turn leads to more pheromone and so eventually the entire colony picks the short path. 
 
@@ -173,10 +173,36 @@ p_k(i,j) =
 \end{cases}
 \]
 
-Here $\eta(i, j)$ is a heuristic we define, $\alpha$ and $\beta$ control the importance of the pheromone and the heuristic respectively. Note that the equation differs slightly from Levine’s by including $\alpha$, this is relatively standard, see (\cite{aaron}, \cite{gendreau}). Once each ant has arrived at a complete solution, the pheromone on each edge is updated. Each ant can be thought to have a limited value of pheromone which is spread equally across the length it travelled, therefore if it went a shorter length the pheromone it left would be denser. Each iteration some pheromone will also evaporate; this is determined by $\rho$. 
+Here $\eta(i, j)$ is a heuristic we define, $\alpha$ and $\beta$ control the importance of the pheromone and the heuristic respectively. $C_k(i)$ is the set of cities that still have to be visited by ant k which is in city i - in the general case this is the set of feasible components which can currently be added to the solution. Note that the equation differs slightly from Levine’s by including $\alpha$, this is relatively standard, see (\cite{aaron}, \cite{gendreau}). Once each ant has arrived at a complete solution, the pheromone on each edge is updated. Each ant can be thought to have a limited value of pheromone which is spread equally across the length it travelled, therefore if it went a shorter length the pheromone it left would be denser. Each iteration some pheromone will also evaporate; this is determined by $\rho$. 
 
 
 \subsubsection{implementation}
+The parameters were chosen using Levine’s work \cite{levine} as a guide. We found that using a population of ants tied to the number of items, n, was effective, specifically choosing a size of 0.8 x n. The heuristic value used for an item is that item’s weight. The evaporation parameter p was set to 0.95 with the heuristic importance $\alpha$ = 2 and pheromone importance $\beta$ = 5, though so long as these were above 1, performance was relatively consistent across values tried. We use pheromone scores between item weights, for example if an item of size x and an item of size y frequently appear in good solutions then the pheromone value between x and y will be high. To get the pheromone value for a specific item j being put in a specific bin b we use the following equation from Levine: 
+
+\[
+\tau_b(j) =
+\begin{cases}
+\dfrac{1}{|b|}\sum_{i \in b} \tau(i,j) & \text{if } b \neq \varnothing\\[10pt]
+1 & \text{otherwise}.
+\end{cases}
+\]
+
+This effectively means that if in a good solution item j tends to pair with the items already in bin b then item j should have higher probability of being added to bin b. If no item can fit in the last opened bin, then b must be a new bin we open, in this case it does not matter what item is chosen and so the pheromone score will be 1 independent of the item. When updating the pheromone value between weights based off of a solution, we first multiply the value by the evaporation parameter (0.95 here). Then add the product of the number of appearances of the specific weight pair in the solution and the fitness of the solution. Fitness is determined by the same objective function used in our simulated annealing implementation (the sum of squared bin weights divided by the total weight of all items). (TODO: this originally came from Faulknauer, so credit somewhere). 
+
+We use some ideas from MMAS by Stuetzle and Hoos (\cite{stuetzle}) (the same used by Levine). The first is that in each iteration only the best ant (the one with highest fitness) found in that iteration places pheromone, and that every $\gamma$ iterations the best ant found so far is used. We set $\gamma$ to be 500/n. This value is important because it effectively determines the balance between exploration and exploitation, with low values leading to rapid reinforcement of the best components and so less opportunity for exploration. The second idea we take requires defining minimum and maximum possible pheromone values ($\tau_{\min}$ and $\tau_{\max}$ respectively), which we do using the formula arrived at by Stuetzle and Hoos: 
+
+\[
+\tau_{\max} =
+\frac{p} {1-p}\\[10pt]
+\]
+
+\[
+\tau_{\min} =
+\frac{\tau_{\max}\left(1 - \sqrt[n]{pbest}\right)} {(avg - 1)\sqrt[n]{pbest}}\\[10pt]
+\]
+
+Here, pbest is the probability of constructing the best solution after every pheromone value has converged to $\tau_{\min}$ or $\tau_{\max}$. Note however that this is only an approximation since if a set of items are put into a bin the order in which this happens does not affect the outcome which interferes with the mathematics carried out to arrive at the above equation for $\tau_{\min}$. Additionally, $\tau_{\max}$ cannot be used as a maximum since certain pairs of weights can appear more times in a solution than others – so will be reinforced more. We set pbest to 0.05, and when updating the pheromone value for a component if the value falls below $\tau_{\min}$ it is set to $\tau_{\min}$. The final idea we take from MMAS is the use of optimistic initial pheromone values, specifically setting each to $\tau_{\max}$. 
+
 
 \section{Comparison}
 
@@ -222,6 +248,8 @@ Here $\eta(i, j)$ is a heuristic we define, $\alpha$ and $\beta$ control the imp
 \bibitem{dosa} D\'osa, G. (2007). The tight bound of First Fit Decreasing bin-packing algorithm is FFD(I) $\leq$ 11/9 OPT(I) + 6/9. In B. Chen, M. Paterson, \& G. Zhang (Eds.), \textit{Combinatorics, Algorithms, Probabilistic and Experimental Methodologies (ESCAPE 2007)} (Lecture Notes in Computer Science, vol.~4614, pp.~1--11). Springer, Berlin, Heidelberg. \url{https://doi.org/10.1007/978-3-540-74450-4\_1}
 
 \bibitem{gga} Falkenauer, E. (1996). The Grouping Genetic Algorithm. In: Floudas, C.A., Pardalos, P.M. (eds) State of the Art in Global Optimization. Nonconvex Optimization and Its Applications, vol 7. Springer, Boston, MA. \url{https://doi.org/10.1007/978-1-4613-3437-8_17}
+
+\bibitem{stuetzle} Stützle, T., \& Hoos, H. H. (2000). MAX–MIN Ant System. *Future Generation Computer Systems, 16*(8), 889--914. \url{https://doi.org/10.1016/S0167-739X(00)00043-1}
 
 \bibitem{levine} Levine, J., \& Ducatelle, F. (2004). Ant colony optimization and local search for bin packing and cutting stock problems. Journal of the Operational Research Society, 55(7), 705–716. \url{https://doi.org/10.1057/palgrave.jors.2601771} 
 
