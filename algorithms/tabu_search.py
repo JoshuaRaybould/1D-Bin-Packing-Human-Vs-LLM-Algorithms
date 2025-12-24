@@ -51,7 +51,7 @@ def tabuSearch(binCapacity, weights, decreasing):
    swapping = 0
    num2s = 0
    num1s = 0
-   passcheck = 0
+   # passcheck = 0
 
    tabuList = []
    tabuMaxLen = 8
@@ -142,7 +142,7 @@ def tabuSearch(binCapacity, weights, decreasing):
             newJBinWeight = jBinWeight + valToMove
 
             if newJBinWeight <= binCapacity:
-               passcheck += 1
+               # passcheck += 1
                new = newJBinWeight*newJBinWeight + newIBinWeight*newIBinWeight
                old = jBinWeight*jBinWeight + iBinWeight*iBinWeight
                scoreChange = new - old
