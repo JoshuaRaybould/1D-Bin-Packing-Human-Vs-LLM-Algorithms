@@ -203,8 +203,18 @@ We use some ideas from MMAS by Stuetzle and Hoos (\cite{stuetzle}) (the same use
 
 Here, pbest is the probability of constructing the best solution after every pheromone value has converged to $\tau_{\min}$ or $\tau_{\max}$. Note however that this is only an approximation since if a set of items are put into a bin the order in which this happens does not affect the outcome which interferes with the mathematics carried out to arrive at the above equation for $\tau_{\min}$. Additionally, $\tau_{\max}$ cannot be used as a maximum since certain pairs of weights can appear more times in a solution than others – so will be reinforced more. We set pbest to 0.05, and when updating the pheromone value for a component if the value falls below $\tau_{\min}$ it is set to $\tau_{\min}$. The final idea we take from MMAS is the use of optimistic initial pheromone values, specifically setting each to $\tau_{\max}$. 
 
+\subsection{Greedy Randomised Adaptive Search Procedures (GRASP) }
+
+\subsubsection{Overview}
+GRASP has two main phases; the first is construction, where a candidate solution is constructed via some greedy procedure. The second is a local search, which is applied to the candidate solution. These two phases are repeated over a number of iterations at which point the solution found with greatest quality is returned. Construction is carried out by selecting components to add at random amongst the remaining components with the lowest cost (or equivalently the greatest quality). There are a variety of options for how construction is carried out, for example you may select among the best x\% of remaining components. Another option is to choose components that are greater than or equal to some threshold quality, which is generally $q^{\min}$ + (1 - $\alpha$)($q^{\max}$ – $q^{\min}$), where $q^{\min}$ and $q^{\max}$ are the qualities of the worst and best component respectively and $\alpha$ is some fixed value.  It is also possible to use methods commonly used for genetic algorithms, such as tournament selection.  
+
+(TODO: Largely reworded and summarised from Handbook of Metaheuristics book) 
+
+There are also various enhancements that can be applied to the phases of GRASP. For example, in Reactive GRASP, a threshold quality is used during construction, but $\alpha$ is not fixed. Instead, we start with a set of possible values for $\alpha$ each with equal probability of being selected and adjust these probabilities each iteration based off their performance so far. One method would be to have the probability of some value for $\alpha$ be proportional to the average solution quality achieved by that value so far. By doing this it makes use of information from previous iterations to inform new ones which may lead it to a better final solution. Another possible change is rather than picking at random between the components we are selecting from (e.g. those in the best x\%) we can bias the construction towards specific values. Another important enhancement is path-relinking, which can drastically improve both the runtime and final solution. We won’t go into detail here, but it is an intensification strategy, which effectively explores a path connecting two strong/interesting solutions that were found by the local search method. We then apply a local search to the best solution found on the path in the hopes this will be a better solution. 
+\subsubsection{implementation}
 
 \section{Comparison}
+
 
 \begin{thebibliography}{00}
 \bibitem{maxence} Maxence Delorme, Manuel Iori, Silvano Martello, Bin packing and cutting stock problems: Mathematical models and exact algorithms, European Journal of Operational Research, Volume 255, Issue 1, 2016, Pages 1-20, ISSN 0377-2217, \url{https://doi.org/10.1016/j.ejor.2016.04.030}.
