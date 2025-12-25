@@ -1,10 +1,10 @@
 from utilities import load_data
 from utilities import test_correctness
 import time
-from algorithms import randomised_best_fit, simulated_annealing, grouping_genetic_algorithm, tabu_search, ant_colony_optimisation
+from algorithms import randomised_best_fit, simulated_annealing, grouping_genetic_algorithm, tabu_search, ant_colony_optimisation, GRASP
 
-algorithmOptions = [randomised_best_fit.randomisedBestFit, simulated_annealing.simulatedAnnealingFF, simulated_annealing.simulatedAnnealingFFD, tabu_search.tabuSearchFF, tabu_search.tabuSearchFFD, grouping_genetic_algorithm.groupingGeneticAlgorithm, ant_colony_optimisation.antColonyOptimisation]
-chosenAlgorithm = algorithmOptions[6]
+algorithmOptions = [randomised_best_fit.randomisedBestFit, simulated_annealing.simulatedAnnealingFF, simulated_annealing.simulatedAnnealingFFD, tabu_search.tabuSearchFF, tabu_search.tabuSearchFFD, grouping_genetic_algorithm.groupingGeneticAlgorithm, ant_colony_optimisation.antColonyOptimisation, GRASP.reactiveGRASP]
+chosenAlgorithm = algorithmOptions[-1]
 
 test = False
 small = True
