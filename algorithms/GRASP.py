@@ -12,6 +12,7 @@ def reactiveGRASP(binCapacity, weights):
 
     alphaVals = [0.05, 0.1, 0.15]
     probabilities = []
+    learningRate = 0.995
     averageCosts = []
     initialProbability = 1/len(alphaVals)
     for _ in alphaVals:
@@ -90,9 +91,16 @@ def reactiveGRASP(binCapacity, weights):
         if iteration % 2  == 0 and everyAlphaUsed(averageCosts):
             qualitities = []
             totalQuality = 0
+
+            smallestCost = float("infinity")
+            for cost in averageCosts:
+                if cost[0] < smallestCost:
+                    smallestCost = cost[0]
             
+            learningParameter = learningRate * smallestCost
+
             for x in range(0, len(averageCosts)):
-                quality = len(weights) / averageCosts[x][0]
+                quality = len(weights) / (averageCosts[x][0] - learningParameter)
                 qualitities.append(quality)
                 totalQuality += quality
             
@@ -105,5 +113,6 @@ def reactiveGRASP(binCapacity, weights):
             
             if bestSolutionBins == lowerBound:
                 return bestSolution
-    print(probabilities)
+    
+    # print(probabilities)
     return bestSolution
