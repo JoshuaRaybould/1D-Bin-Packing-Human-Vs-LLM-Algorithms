@@ -10,7 +10,7 @@ def everyAlphaUsed(averageCosts):
 
 def reactiveGRASP(binCapacity, weights):
 
-    alphaVals = [0.2, 0.4, 0.6, 0.8]
+    alphaVals = [0.05, 0.1, 0.15]
     probabilities = []
     averageCosts = []
     initialProbability = 1/len(alphaVals)
@@ -27,7 +27,7 @@ def reactiveGRASP(binCapacity, weights):
     bestSolutionBins = float("infinity") 
 
     weights.sort(reverse=True) # Saves time finding best and worst quality items
-    while iteration < 500:
+    while iteration < 30:
         iteration += 1
         
         toPack = weights.copy()
@@ -77,14 +77,17 @@ def reactiveGRASP(binCapacity, weights):
             candidateSolution["packing"][-1].append(toPack[packIndex])
             candidateSolution["bin_weights"][-1] += toPack[packIndex]
             toPack.pop(packIndex)
+        
+        candidateSolution = tabu_search.tabuSearch(binCapacity, weights, candidateSolution, True)
 
         solCost = len(candidateSolution["packing"])
+        
         # Get the sum of the qualities of the solutions given by the specific alpha index
         sumOfScores = averageCosts[alphaIndex][0] * averageCosts[alphaIndex][1] + solCost
         averageCosts[alphaIndex][1] += 1
         averageCosts[alphaIndex][0] = sumOfScores/ (averageCosts[alphaIndex][1])
         
-        if iteration % 5  == 0 and everyAlphaUsed(averageCosts):
+        if iteration % 2  == 0 and everyAlphaUsed(averageCosts):
             qualitities = []
             totalQuality = 0
             
@@ -92,7 +95,6 @@ def reactiveGRASP(binCapacity, weights):
                 quality = len(weights) / averageCosts[x][0]
                 qualitities.append(quality)
                 totalQuality += quality
-            print(averageCosts)
             
             for x in range(0, len(probabilities)):
                 probabilities[x] = qualitities[x] / totalQuality
