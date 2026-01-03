@@ -221,9 +221,9 @@ def tabuSearch(binCapacity, weights, candidateSolution, fastSearch):
    return determineBest(bestSolution, candidateSolution)
 
 def tabuSearchFFD(binCapacity, weights):
-    candidateSolution = first_fit.firstFit(binCapacity, weights, True)
+    candidateSolution = first_fit.firstFit(binCapacity, weights, True, False)
     return tabuSearch(binCapacity, weights, candidateSolution, False)
 
 def tabuSearchFF(binCapacity, weights):
-    candidateSolution = first_fit.firstFit(binCapacity, weights, False)
+    candidateSolution = first_fit.firstFit(binCapacity, weights, False, False)
     return tabuSearch(binCapacity, weights, candidateSolution, False)

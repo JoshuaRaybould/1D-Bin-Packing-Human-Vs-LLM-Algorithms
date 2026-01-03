@@ -6,7 +6,7 @@ from . import first_fit
 def simulatedAnnealing(binCapacity, weights, decreasing):
 
     temperature = 100000
-    candidateSolution = first_fit.firstFit(binCapacity, weights, decreasing)
+    candidateSolution = first_fit.firstFit(binCapacity, weights, decreasing, False)
 
     #print(len(candidateSolution["bin_weights"]))
     """num1s = 0
