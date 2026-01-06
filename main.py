@@ -2,17 +2,18 @@ from utilities import load_data
 from utilities import test_correctness
 from enum import Enum
 import time
-from algorithms import randomised_best_fit, simulated_annealing, grouping_genetic_algorithm, tabu_search, ant_colony_optimisation, GRASP
+from algorithms import randomised_best_fit, simulated_annealing, grouping_genetic_algorithm, tabu_search, ant_colony_optimisation, GRASP, variable_neighbourhood_search
 
-algorithmOptions = [randomised_best_fit.randomisedBestFit, simulated_annealing.simulatedAnnealingFF, simulated_annealing.simulatedAnnealingFFD, tabu_search.tabuSearchFF, tabu_search.tabuSearchFFD, grouping_genetic_algorithm.groupingGeneticAlgorithm, ant_colony_optimisation.antColonyOptimisation, GRASP.reactiveGRASP]
-chosenAlgorithm = algorithmOptions[1]
+algorithmOptions = [randomised_best_fit.randomisedBestFit, simulated_annealing.simulatedAnnealingFF, simulated_annealing.simulatedAnnealingFFD, tabu_search.tabuSearchFF, tabu_search.tabuSearchFFD, grouping_genetic_algorithm.groupingGeneticAlgorithm, ant_colony_optimisation.antColonyOptimisation, GRASP.reactiveGRASP, variable_neighbourhood_search.variableNeighbourhoodSearchFFD]
+chosenAlgorithm = algorithmOptions[-1]
 
 class Mode(Enum):
    DEFAULT = 0
    TEST = 1
    CHOOSE = 2
+   SMALL = 3
 
-modeOfOperation = Mode.CHOOSE
+modeOfOperation = Mode.SMALL
 done = False
 while not done:
    done = True
@@ -97,6 +98,14 @@ elif modeOfOperation == Mode.CHOOSE:
    for instance in instances:  
       chosenInstances.append(instance)
       if len(chosenInstances) == numInstances:
+         break
+   applyAlgorithm(chosenInstances, chosenAlgorithm, False)
+elif modeOfOperation == Mode.SMALL:
+   chosenInstances = []
+   for instance in instances:  
+      if len(instance["weights"]) <= 250 and len(instance["weights"]) > 200:
+         chosenInstances.append(instance)
+      if len(chosenInstances) == 5:
          break
    applyAlgorithm(chosenInstances, chosenAlgorithm, False)
 else:
