@@ -2,6 +2,23 @@ import random
 import math
 import random
 import pickle
+import time
+
+totalTimeFitting = 0
+
+def getSmallestBinGroup(child, weights, number):
+    smallestBin = float('inf')
+    smallestBinIndex = -1
+
+    for groupIndex in child["bin_groups"]:
+        binSize = 0
+        for j in child["bin_groups"][groupIndex]:
+            binSize += weights[j]
+        if binSize < smallestBin:
+            smallestBin = binSize
+            smallestBinIndex = groupIndex
+    return smallestBinIndex
+
 
 def doesEncodingMakeSense(encoding, groupIndex):
     for x in range(0, len(encoding["encoding"])):
@@ -13,7 +30,9 @@ def doesEncodingMakeSense(encoding, groupIndex):
             break
 
 def randomisedFirstFitEncoded(binCapacity, weights):
+    global totalTimeFitting
     binGroups = {}
+    binWeights = {}
     # First len(weights) indexes correspond to items
     # The value stored at the index corresponds to the bin the item is in
     encoding = [0] * len(weights)
@@ -26,11 +45,11 @@ def randomisedFirstFitEncoded(binCapacity, weights):
     for index in itemOrder:
         packed = False
         for b in range(0, len(binGroups)):
-            binWeight = 0
-            for j in binGroups[b]:
-                binWeight += weights[j]
+            if b not in binWeights:
+                binWeights[b] = 0
 
-            if binWeight + weights[index] <= binCapacity:
+            if binWeights[b] + weights[index] <= binCapacity:
+                binWeights[b] += weights[index]
                 encoding[index] = b
                 binGroups[b].append(index)
                 packed = True
@@ -39,6 +58,8 @@ def randomisedFirstFitEncoded(binCapacity, weights):
         if not packed:
             encoding[index] = len(binGroups)
             binGroups[len(binGroups)] = [index]
+            binWeights[len(binGroups)] = weights[index]
+
     fullEncoding = {}
     fullEncoding["encoding"] = encoding
     fullEncoding["bin_groups"] = binGroups
@@ -61,6 +82,7 @@ def getFirstUnusedGroupIndex(child):
         i += 1
 
 def firstFitDecreasing(child, unassignedItems, weights, binCapacity):
+    global totalTimeFitting
     itemWeightPairs = []
     for unassignedItem in unassignedItems:
         pair = [weights[unassignedItem], unassignedItem]
@@ -88,14 +110,13 @@ def firstFitDecreasing(child, unassignedItems, weights, binCapacity):
             label = getFirstUnusedGroupIndex(child)
             child["encoding"][itemIndex] = label
             child["bin_groups"][label] = [itemIndex]
-
     return child
 
 def fillGroup(parent1, parent2Groups, unassignedItems1):
 
     for groupIndex in parent2Groups:
         # We need to go through every single value in the groups and assign if unassigned, or change bin
-        doesEncodingMakeSense(parent1, -1)
+        # doesEncodingMakeSense(parent1, -1)
         for item in parent2Groups[groupIndex]:
             itemCurrentGroup = parent1["encoding"][item]
 
@@ -113,15 +134,15 @@ def fillGroup(parent1, parent2Groups, unassignedItems1):
                 parent1["encoding"][item] = groupIndex
 
         parent1["bin_groups"][groupIndex] = parent2Groups[groupIndex]
-        doesEncodingMakeSense(parent1, groupIndex)
+        # doesEncodingMakeSense(parent1, groupIndex)
 
 def crossover(parent1, parent2, weights, binCapacity):
     # 2 point crossover
-    doesEncodingMakeSense(parent1, -10)
-    doesEncodingMakeSense(parent2, -10)
+    # doesEncodingMakeSense(parent1, -10)
+    # doesEncodingMakeSense(parent2, -10)
 
-    s = random.randint(0, len(parent1["bin_groups"]))
-    e = random.randint(0, len(parent1["bin_groups"]))
+    s = random.randint(0, len(parent1["bin_groups"]) - 1)
+    e = random.randint(0, len(parent1["bin_groups"]) - 1)
     if e < s:
         tmp = s
         s = e
@@ -180,18 +201,24 @@ def mutate(child, weights, binCapacity):
     for groupIndex in child["bin_groups"]:
         for j in child["bin_groups"][groupIndex]:
             mutateStartWeight += weights[j]"""
+    
+    prob = random.random()
+    b = -1
+    if prob < 0.05:
+       smallestBin = getSmallestBinGroup(child, weights, 3)
+       b = smallestBin
+       unassignedItems = child["bin_groups"].pop(b)
+    else:
+        # Pick a bin at random to remove, we then run FFD to put the items back into groups
+        b = random.randint(0, len(child["bin_groups"]))
 
-
-    # Pick a bin at random to remove, we then run FFD to put the items back into groups
-    b = random.randint(0, len(child["bin_groups"]))
-
-    # We eliminate the bth group, not necessarily corresponding to a group labelled b
-    i = 0
-    for groupIndex in child["bin_groups"]:
-        if i == b:
-            unassignedItems = child["bin_groups"].pop(groupIndex)
-            break
-        i += 1
+        # We eliminate the bth group, not necessarily corresponding to a group labelled b
+        i = 0
+        for groupIndex in child["bin_groups"]:
+            if i == b:
+                unassignedItems = child["bin_groups"].pop(groupIndex)
+                break
+            i += 1
 
     child = firstFitDecreasing(child, unassignedItems, weights, binCapacity)
 
@@ -203,66 +230,76 @@ def mutate(child, weights, binCapacity):
     return child
 
 def scoreFitnesses(weights, population, fitness):
-   # We use the same fitness function as in our simulated annealing implementation
-   # The sum of the squares of each bin's weight
-   best = 0
-   bestFitness = float("inf")
-   for x in range(0, len(population)):
-      fitness[x] = 0
-      # Iterate through groups
-      groups = population[x]["bin_groups"]
-      for groupIndex in groups:
+    # We use the same fitness function as in our simulated annealing implementation
+    # The sum of the squares of each bin's weight
+    best = 0
+    bestFitness = float("inf")
+    for x in range(0, len(population)):
+        fitness[x] = 0
+        # Iterate through groups
+        groups = population[x]["bin_groups"]
+        for groupIndex in groups:
             binWeight = 0
 
             for item in groups[groupIndex]:
                binWeight += weights[item]
 
             fitness[x] += binWeight * binWeight
-      if fitness[x] > bestFitness:
+        if fitness[x] > bestFitness:
             best = x
             bestFitness = fitness[x]
-
-   return best
+    return best
 
 
 def groupingGeneticAlgorithm(binCapacity, weights):
+    global totalTimeFitting
+
     populationSize = 20
     population = []
 
+    start = time.perf_counter()
     # To generate our initial population we will apply first fit to a random order of weights
     for x in range(0, populationSize):
         population.append(randomisedFirstFitEncoded(binCapacity, weights))
+    totalTimeFitting += (time.perf_counter() - start)
 
     best = 0
     bestFitness = float("inf")
     i = 0
     lowerBound = math.ceil(sum(weights)/binCapacity)
-    while i < 60 and bestFitness > lowerBound:
+    while i < 600 and bestFitness > lowerBound:
+
+        #print(bestFitness)
         i += 1
 
         # We use the same fitness function as in our simulated annealing implementation
         # The sum of the squares of each bin's weight
         fitness = {}
         best = scoreFitnesses(weights, population, fitness)
+        if bestFitness != fitness[best]:
+            print("progress")
+        #print(fitness)
         bestFitness = fitness[best]
+        #print(fitness[best])
 
         newPopulation = []
         newPopulation.append(population[best]) # Save the best packing we've found so far
-
         while len(newPopulation) < populationSize:
             # Select 2 from our population by tournament selection
             parent1Index = tournamentSelect(population, fitness)
             parent2Index = tournamentSelect(population, fitness)
-
             # Crossover
             # Crossover is expensive so we are going to do it 10% of the time
             prob = random.random()
+
+            parentCopy1 = pickle.loads(pickle.dumps(population[parent1Index], -1))
+            parentCopy2 = pickle.loads(pickle.dumps(population[parent2Index], -1))
+
             if parent1Index != parent2Index and prob > 0.9:
                 # https://stackoverflow.com/questions/24756712/deepcopy-is-extremely-slow
-                children = crossover(pickle.loads(pickle.dumps(population[parent1Index], -1)), pickle.loads(pickle.dumps(population[parent2Index], -1)), weights, binCapacity)
+                children = crossover(parentCopy1, parentCopy2, weights, binCapacity)
             else:
-                children = [pickle.loads(pickle.dumps(population[parent1Index], -1)), pickle.loads(pickle.dumps(population[parent2Index], -1))]
-            #children = [pickle.loads(pickle.dumps(population[parent1Index], -1)), pickle.loads(pickle.dumps(population[parent2Index], -1))]
+                children = [parentCopy1, parentCopy2]
 
             # Mutation
             child1 = mutate(children[0], weights, binCapacity)
@@ -272,7 +309,7 @@ def groupingGeneticAlgorithm(binCapacity, weights):
             newPopulation.append(child2)
 
         population = newPopulation
-
+  
     # Convert from encoding back to normal
     bins = {}
     bins["packing"], bins["bin_weights"] = [], []
@@ -285,5 +322,7 @@ def groupingGeneticAlgorithm(binCapacity, weights):
         for i in bestSolGroups[groupIndex]:
             bins["packing"][-1].append(weights[i])
             bins["bin_weights"][-1] += weights[i]
+    
+    print(totalTimeFitting)
 
     return bins
