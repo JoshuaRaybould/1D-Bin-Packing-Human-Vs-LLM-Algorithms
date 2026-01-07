@@ -1,5 +1,5 @@
 import random
-import math
+from . import helpers
 import random
 import pickle
 import time
@@ -266,7 +266,7 @@ def groupingGeneticAlgorithm(binCapacity, weights):
     best = 0
     bestFitness = float("inf")
     i = 0
-    lowerBound = math.ceil(sum(weights)/binCapacity)
+    lowerBound = helpers.getLowerBound(weights, binCapacity)
     while i < 600 and bestFitness > lowerBound:
 
         #print(bestFitness)

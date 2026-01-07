@@ -61,7 +61,7 @@ def tabuSearch(binCapacity, weights, candidateSolution, fastSearch):
    bestSolution = candidateSolution
 
    # We can use the lower bound as a way to check if we have arrived at the ideal solution (though it may not be achievable)
-   lowerBound = math.ceil(sum(weights)/binCapacity)
+   lowerBound = helpers.getLowerBound(weights, binCapacity)
    totalIterations = 10000
    if fastSearch:
       totalIterations = 1000
@@ -217,6 +217,9 @@ def tabuSearch(binCapacity, weights, candidateSolution, fastSearch):
    print(len(bestSolution["bin_weights"]))
    print(len(tabuList))
    print("end")"""
+
+   if len(bestSolution["packing"]) == lowerBound:
+      print("WOOOOOW")
 
    return determineBest(bestSolution, candidateSolution)
 

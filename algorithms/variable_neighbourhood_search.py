@@ -196,17 +196,21 @@ def variableNeighbourhoodSearch(binCapacity, weights, candidateSolution):
     iteration = 0
     totalIterations = 10
 
+    lowerBound = helpers.getLowerBound(weights, binCapacity)
+
     indexArr = []
     #print(weights)
     #print(incumbentSolution)
     for x in range(0, len(weights)):
         indexArr.append(x)
 
-    while iteration < totalIterations:
+    while iteration < totalIterations and len(incumbentSolution["packing"]) > lowerBound: 
         iteration += 1
         k = 1
 
-        while k < kMax + 1:     
+        while k < kMax + 1:
+            if len(incumbentSolution["packing"]) == lowerBound:
+                return incumbentSolution
             unmoved = indexArr.copy()
             newSolution = pickle.loads(pickle.dumps(incumbentSolution, -1))
             for x in range(0, k):
@@ -219,8 +223,7 @@ def variableNeighbourhoodSearch(binCapacity, weights, candidateSolution):
                 k = 0
             else:
                 k += 1
-            
-   
+
     return incumbentSolution
 
 def variableNeighbourhoodSearchFFD(binCapacity, weights):

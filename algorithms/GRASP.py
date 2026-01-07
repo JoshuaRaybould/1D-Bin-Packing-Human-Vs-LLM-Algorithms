@@ -1,6 +1,6 @@
-import math
 import random
 from . import tabu_search
+from . import helpers
 
 def everyAlphaUsed(averageCosts):
     for averageCost in averageCosts:
@@ -21,7 +21,7 @@ def reactiveGRASP(binCapacity, weights):
         averageCosts.append([0, 0]) 
 
     # We can use the lower bound as a way to check if we have arrived at the ideal solution (though it may not be achievable)
-    lowerBound = math.ceil(sum(weights)/binCapacity)
+    lowerBound = helpers.getLowerBound(weights, binCapacity)
     iteration = 0
 
     bestSolution = []

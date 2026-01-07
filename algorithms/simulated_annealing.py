@@ -15,7 +15,7 @@ def simulatedAnnealing(binCapacity, weights, decreasing):
     acc2s = 0"""
 
     # We can use the lower bound as a way to check if we have arrived at the ideal solution (though it may not be achievable)
-    lowerBound = math.ceil(sum(weights)/binCapacity)
+    lowerBound = helpers.getLowerBound(weights, binCapacity)
     iteration = 0
     while len(candidateSolution["bin_weights"]) > lowerBound and temperature > 0.01 and iteration < 100000:
         iteration += 1

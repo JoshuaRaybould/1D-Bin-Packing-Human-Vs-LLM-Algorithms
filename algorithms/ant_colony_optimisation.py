@@ -1,5 +1,14 @@
 import random
 import math
+from . import helpers
+
+def convertToBins(solution):
+   bins = {}
+   bins["packing"], bins["bin_weights"] = [], []
+   for group in solution:
+      bins["packing"].append(group)
+      bins["bin_weights"].append(sum(group))
+   return bins
 
 def pickWeightIndex(curAntSol, weights, pheromoneScores, pheromoneImportance, heuristicImportance, binCapacity):
    if not curAntSol or sum(curAntSol[-1]) + weights[-1] > binCapacity:
@@ -79,8 +88,13 @@ def antColonyOptimisation(binCapacity, weights):
          if x != y:
             pheromoneScores[(weights[x], weights[y])] = tmax
    
+   lowerBound = helpers.getLowerBound(weights, binCapacity)
+
    # Have each ant build a solution
    for y in range (0, 15):
+      if bestSolutionSoFar and len(bestSolutionSoFar) == lowerBound:
+         bins = convertToBins(bestSolutionSoFar)
+         return bins
       bestSolutionThisIterationFitness = 0
       bestSolutionThisIteration = []
       for x in range(0, populationSize):
@@ -115,12 +129,7 @@ def antColonyOptimisation(binCapacity, weights):
       for pair in pheromoneScores:
          pheromoneScores[pair] = max(tmin, pheromoneScores[pair])
 
-
-   bins = {}
-   bins["packing"], bins["bin_weights"] = [], []
-   for group in bestSolutionSoFar:
-      bins["packing"].append(group)
-      bins["bin_weights"].append(sum(group))
+   bins = convertToBins(bestSolutionSoFar)
 
    return bins
    
