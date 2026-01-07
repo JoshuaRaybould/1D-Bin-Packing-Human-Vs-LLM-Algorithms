@@ -1,12 +1,12 @@
 import math
 import random
-from . import first_fit
+from . import helpers
 
 # Decreasing is to decide whether to use first fit with or without putting the data in decreasing order first
 def simulatedAnnealing(binCapacity, weights, decreasing):
 
     temperature = 100000
-    candidateSolution = first_fit.firstFit(binCapacity, weights, decreasing, False)
+    candidateSolution = helpers.firstFit(binCapacity, weights, decreasing, False)
 
     #print(len(candidateSolution["bin_weights"]))
     """num1s = 0

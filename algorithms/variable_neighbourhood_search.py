@@ -1,6 +1,6 @@
 import pickle
 import random
-from . import first_fit
+from . import helpers
 
 def findContainingBin(itemIndex, candidateSolution):
     for b in range(0, len(candidateSolution["packing"])):
@@ -224,7 +224,7 @@ def variableNeighbourhoodSearch(binCapacity, weights, candidateSolution):
     return incumbentSolution
 
 def variableNeighbourhoodSearchFFD(binCapacity, weights):
-    candidateSolution = first_fit.firstFit(binCapacity, weights, True, True)
+    candidateSolution = helpers.firstFit(binCapacity, weights, True, True)
     return variableNeighbourhoodSearch(binCapacity, weights, candidateSolution)
 
 

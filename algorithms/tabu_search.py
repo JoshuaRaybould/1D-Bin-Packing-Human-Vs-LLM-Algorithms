@@ -1,7 +1,7 @@
 import pickle
 import math
 import random
-from . import first_fit
+from . import helpers
 
 def determineBest(bestSolution, candidateSolution):
    bestSolScore = 0
@@ -221,9 +221,9 @@ def tabuSearch(binCapacity, weights, candidateSolution, fastSearch):
    return determineBest(bestSolution, candidateSolution)
 
 def tabuSearchFFD(binCapacity, weights):
-    candidateSolution = first_fit.firstFit(binCapacity, weights, True, False)
+    candidateSolution = helpers.firstFit(binCapacity, weights, True, False)
     return tabuSearch(binCapacity, weights, candidateSolution, False)
 
 def tabuSearchFF(binCapacity, weights):
-    candidateSolution = first_fit.firstFit(binCapacity, weights, False, False)
+    candidateSolution = helpers.firstFit(binCapacity, weights, False, False)
     return tabuSearch(binCapacity, weights, candidateSolution, False)
