@@ -44,6 +44,8 @@ while index < len(toPack):
                 I2Size += 1
                 I2Sum += toPack[x]
             elif toPack[x] >= toPack[curkIndex]:
+                if I2Pos == -1:
+                    I2Pos = x
                 I3Sum += toPack[x]
             else:
                 break
@@ -61,12 +63,13 @@ print("stopping point " + str(stoppingPoint))
 
 
 print(toPack)
-print(curkIndex)
-print(I1andI2Const)
-print(I2Size)
-print(I2Sum)
-print(I3Sum)
-print(lowerBound)
+print("k index " + str(curkIndex))
+print("Constant big item cost " + str(I1andI2Const))
+print("I2 pos " + str(I2Pos))
+print("I2 size " + str(I2Size))
+print("I2 sum " + str(I2Sum))
+print("I3 sum " + str(I3Sum))
+print("current lower bound " + str(lowerBound))
 
 startPoint = curkIndex + 1
 
@@ -87,7 +90,7 @@ else:
             startPoint = curkIndex
             curkIndex += 1
 
-            I2Max = binCapacity - k
+        I2Max = binCapacity - k
 
         while I2Pos > 0 and toPack[I2Pos - 1] <= I2Max:
             I2Size += 1
@@ -98,12 +101,13 @@ else:
         lowerBound = I1andI2Const + max(0, math.ceil(smallItemTerm))
         
         print(toPack)
-        print(curkIndex)
-        print(I1andI2Const)
-        print(I2Size)
-        print(I2Sum)
-        print(I3Sum)
-        print(lowerBound)
+        print("k index " + str(curkIndex-1))
+        print("Constant big item cost " + str(I1andI2Const))
+        print("I2 pos " + str(I2Pos))
+        print("I2 size " + str(I2Size))
+        print("I2 sum " + str(I2Sum))
+        print("I3 sum " + str(I3Sum))
+        print("current lower bound " + str(lowerBound))
         stoppingSmallTerm = (stoppingSum - (I2Size * binCapacity - I2Sum))/binCapacity
         stoppingPoint = I1andI2Const + math.ceil(stoppingSmallTerm)
         print("stopping point " + str(stoppingPoint))
