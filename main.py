@@ -1,13 +1,18 @@
 from utilities import load_data
 from utilities import test_correctness
+from enum import Enum
 import time
-from algorithms import randomised_best_fit, simulated_annealing, grouping_genetic_algorithm, tabu_search, ant_colony_optimisation
+from algorithms import randomised_best_fit, simulated_annealing, grouping_genetic_algorithm, tabu_search, ant_colony_optimisation, GRASP
 
-algorithmOptions = [randomised_best_fit.randomisedBestFit, simulated_annealing.simulatedAnnealingFF, simulated_annealing.simulatedAnnealingFFD, tabu_search.tabuSearchFF, tabu_search.tabuSearchFFD, grouping_genetic_algorithm.groupingGeneticAlgorithm, ant_colony_optimisation.antColonyOptimisation]
-chosenAlgorithm = algorithmOptions[6]
+algorithmOptions = [randomised_best_fit.randomisedBestFit, simulated_annealing.simulatedAnnealingFF, simulated_annealing.simulatedAnnealingFFD, tabu_search.tabuSearchFF, tabu_search.tabuSearchFFD, grouping_genetic_algorithm.groupingGeneticAlgorithm, ant_colony_optimisation.antColonyOptimisation, GRASP.reactiveGRASP]
+chosenAlgorithm = algorithmOptions[1]
 
-test = False
-small = True
+class Mode(Enum):
+   DEFAULT = 0
+   TEST = 1
+   CHOOSE = 2
+
+modeOfOperation = Mode.CHOOSE
 done = False
 while not done:
    done = True
@@ -83,16 +88,17 @@ def applyAlgorithm(instances, chosenAlgorithm, printSols):
 
 
 
-if test:
+if modeOfOperation == Mode.TEST:
    if test_correctness.testAlgorithmCorrectness(chosenAlgorithm, instances):
       print("Seems to be correct")
-elif small:
-   chosenInstance = []
-   for instance in instances:
-      if len(instance["weights"]) < 200:
-         chosenInstance = [instance]
+elif modeOfOperation == Mode.CHOOSE:
+   numInstances = int(input("Provide a number of instances to run on: "))
+   chosenInstances = []
+   for instance in instances:  
+      chosenInstances.append(instance)
+      if len(chosenInstances) == numInstances:
          break
-   applyAlgorithm(chosenInstance, chosenAlgorithm, False)
+   applyAlgorithm(chosenInstances, chosenAlgorithm, False)
 else:
    ratioScore = 0
    waste = 0

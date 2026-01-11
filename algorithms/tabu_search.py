@@ -45,31 +45,31 @@ def getEmptiestBin(candidateSolution):
          smallestWeight = curWeight
    return theEmptiest
 
-# Decreasing decides whether it is FF or FFD
-def tabuSearch(binCapacity, weights, decreasing):
+# Perform search on given candidate solution
+# Set fastSearch true to reduce iterations
+def tabuSearch(binCapacity, weights, candidateSolution, fastSearch):
    movement = 0
    swapping = 0
    num2s = 0
    num1s = 0
-   passcheck = 0
+   # passcheck = 0
 
    tabuList = []
    tabuMaxLen = 8
    tabuPos = 0
 
-   candidateSolution = first_fit.firstFit(binCapacity, weights, decreasing)
    bestSolution = candidateSolution
-   #print("start")
-   #print(len(candidateSolution["bin_weights"]))
 
    # We can use the lower bound as a way to check if we have arrived at the ideal solution (though it may not be achievable)
    lowerBound = math.ceil(sum(weights)/binCapacity)
+   totalIterations = 10000
+   if fastSearch:
+      totalIterations = 1000
    iteration = 0
-   while len(candidateSolution["bin_weights"]) > lowerBound and iteration < 10000:
+   while len(candidateSolution["bin_weights"]) > lowerBound and iteration < totalIterations:
       iteration += 1
 
-      # For a solution generate a number of neighbours greater than half the number of bins in the solution.
-      # We select the best of these provided none are in the tabu list
+      # We select the best of these neighbours provided none are in the tabu list
       numNeighbours = 40
       bestScoreSoFar = 0
       emptiestBin = getEmptiestBin(candidateSolution)
@@ -120,7 +120,6 @@ def tabuSearch(binCapacity, weights, decreasing):
                      selectedIandVal = [i, iValToSwap]
                      selectedJandVal = [j, jValToSwap]
 
-
          elif choice == 2:
             num2s += 1
             # If possible, move an item from bin i to bin j
@@ -142,7 +141,7 @@ def tabuSearch(binCapacity, weights, decreasing):
             newJBinWeight = jBinWeight + valToMove
 
             if newJBinWeight <= binCapacity:
-               passcheck += 1
+               # passcheck += 1
                new = newJBinWeight*newJBinWeight + newIBinWeight*newIBinWeight
                old = jBinWeight*jBinWeight + iBinWeight*iBinWeight
                scoreChange = new - old
@@ -222,7 +221,9 @@ def tabuSearch(binCapacity, weights, decreasing):
    return determineBest(bestSolution, candidateSolution)
 
 def tabuSearchFFD(binCapacity, weights):
-    return tabuSearch(binCapacity, weights, True)
+    candidateSolution = first_fit.firstFit(binCapacity, weights, True)
+    return tabuSearch(binCapacity, weights, candidateSolution, False)
 
 def tabuSearchFF(binCapacity, weights):
-    return tabuSearch(binCapacity, weights, False)
+    candidateSolution = first_fit.firstFit(binCapacity, weights, False)
+    return tabuSearch(binCapacity, weights, candidateSolution, False)
