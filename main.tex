@@ -26,7 +26,7 @@ The bin packing problem (BPP) is one of the central problems in combinatorial op
 This problem falls into the category NP-Hard and it would take exponential time to arrive at the exact solution. For this reason, it is a good idea to use heuristic or randomised algorithms that don't generally give the exact solution but can obtain a near-optimal one efficiently. Other than being interesting due to its innate difficulty, bin packing also has many real-world applications, such as filling up trucks that have a weight capacity and in areas like cutting industries among others (\cite{munien}). Additionally, problems in scheduling often contain it as a special case. 
 
 \subsection{Problem Definition}
-Here we are looking at the classical (offline) 1D BPP. The following is a relatively standard definition arrived at with reference to \cite{munien}, though note often an equivalent normalised version is used (see: \cite{maxence}). Each bin has the same capacity c, and each item i takes on some weight/size $s_{i}$ such that $s_{i}$ $v \leq c$ c. First, define u to be an upper bound on the minimum number of bins needed to pack all n items. Use $y_{j}$ to represent whether we have opened the jth bin, with 1 $v \leq c$ j $v \leq c$ u. Specifically, $y_j$ = 1 if bin j is open (used) in the solution otherwise it is 0. Items are labeled with i, 1 $v \leq c$ i $v \leq c$ n and we introduce $x_{ij}$ to be 1 if item i is packed in bin j. Our goal is:
+Here we are looking at the classical (offline) 1D BPP. The following is a relatively standard definition arrived at with reference to \cite{munien}, though note often an equivalent normalised version is used (see: \cite{maxence}). Each bin has the same capacity c, and each item i takes on some weight/size $s_{i}$ such that $s_{i} \leq c$. First, define u to be an upper bound on the minimum number of bins needed to pack all n items. Use $y_{j}$ to represent whether we have opened the jth bin, with $1 \leq j \leq u$. Specifically, $y_j$ = 1 if bin j is open (used) in the solution otherwise it is 0. Items are labeled with i, $1 \leq i \leq n$ and we introduce $x_{ij}$ to be 1 if item i is packed in bin j. Our goal is:
 \[
 \min\sum_{j=1}^{u} y_j 
 \]
@@ -47,7 +47,7 @@ There are a very large number of randomised algorithms, which vary drastically i
 \subsection{Complexity Analysis}
  
 \subsection{Large Language Models (LLMs)}
-LLMs operate by predicting the most probable next token in a sequence, based on the context they have seen so far. The parameters of the model are obtained by a process of self-supervised learning on a large amount of training data. In this, they obtain an understanding of the meanings of words within sentences and the sentence structure, such that they can generate reasonable sentences (\cite{stryker}). Due to code being text like LLMs can also generate code.  
+LLMs operate by predicting the most probable next token in a sequence, based on the context they have seen so far. The parameters of the model are obtained by a process of self-supervised learning on a large amount of training data. In this, they obtain an understanding of the meanings of words within sentences and the sentence structure, such that they can generate reasonable sentences (\cite{stryker}). Due to code being text like, LLMs can also generate code.  
 
 Naturally there are limitations; for example, the information they provide is not guaranteed to be correct and so needs verification. If the LLM is asked to produce something like what it saw in its training set, it is very likely to perform well, but it has no ability to reason beyond this (\cite{kucharavy}). This means for common programming tasks any of the popular LLMs (e.g. chatGPT, Gemini, Claude) will (generally) provide a reasonable response, but for niche problems they are much more likely to struggle. Whilst applying randomised algorithms to the bin packing problem is not a niche area, the specific ideas would not appear as frequently in the training set when compared to more general programming problems (e.g. those in the Mostly Basic Python Programming (MBPP) set of problems). Additionally, the algorithms require the tuning of parameters as well as more general design choices (e.g. should there be a local search phase in an implementation of ant colony optimisation) which could pose difficulties.   
 
@@ -69,7 +69,7 @@ This project aims to compare a variety of randomised algorithms on the 1D offlin
 \section{Comparison Criteria}
 
 \subsection{Criteria}
-The main comparison here will be between the randomised algorithms I create, here I will define exactly how the algorithms will be compared with one another. Where possible, results will be presented using graphs.
+The main comparison here will be between the randomised algorithms I create and their equivalents implemented by LLMs, here I will define exactly how the comparison will be carried out.
 
 \subsubsection{Metrics}
 Generally, with algorithms, the first performance measures which come to mind are time and space complexities. Space complexity is not so relevant but time complexity is of importance and will be used where possible. As we are dealing with randomised algorithms this may be less meaningful so it will be useful to obtain empirical data too. Moreover, randomised algorithms do not arrive at exact solutions, as such, measuring how good the algorithm solutions are is arguably the most important metric. A further measure of interest is the complexity of the code. 
@@ -79,6 +79,38 @@ Where possible, it makes sense to determine time complexity. I will also run eac
 
 \subsubsection{Solution Quality}
 Preferably, we want to compare the algorithm's solution to the best possible solution. For this, we will use ratios, as this will allow for comparison across different input lengths and make it easy to obtain a mean performance score. We will use a ratio of the number of bins used by the algorithm to the number of bins used in the optimal case. That is, if our algorithm when applied to a list of items L uses Alg bins and L when packed optimally requires Opt bins, then our ratio is Alg/Opt. It is clear from this that the greater the ratio the worse the algorithm has performed. We can then take the mean of this ratio over a variety of cases to give an idea of how it tends to perform. This is limited since if an algorithm performs well in just a certain case, it may be missed or skew the results. Due to this, I will also take performance measures for specific sizes and plot them and/or determine the mean Alg/Opt for ranges of sizes.
+
+\subsubsection{Lower Bounds}
+
+We first discuss lower bounds as the chosen lower bound will be used as part of the stopping criteria for the algorithms that need it. Using a good lower bound means that algorithms that achieve an optimal solution quickly do not have to waste time carrying out further work. A simple lower bound (which is very well known, see \cite{martello} \cite{gfgbound}) on the number of bins with O(n) time complexity is: 
+
+\[
+L_1 = \left\lceil \frac{\sum_{i=1}^{n} s_i}{C} \right\rceil
+\]
+
+This can be obtained via considering an LP-relaxation of the problem, in which items are allowed to be split across bins. In the optimal solution for this relaxation, each bin we open can be filled to capacity, except potentially the last which contains the remaining weight \cite{fekete}. It is worth noting that despite the simplicity of this bound it is quite good, especially in the case where the weight of each item is small in comparison to capacity. At worst it is $\frac{1}{2}$ of the optimal solution value (\cite{martello}, \cite{fekete}). In our case, the weights of the items generally won’t be small enough and so we use a different bound. 
+
+The L2 bound arrived at by Martello and Toth \cite{martello} is better in the case of larger items and is at worst $\frac{2}{3}$ the optimal solution value. It has slightly worse time complexity of O(nlogn) which is dominated by needing to sort the items by decreasing weight (in the case items are already sorted it is O(n)). We only briefly describe it here based on Martello and Toth’s work, so we recommend those interested to refer to their paper \cite{martello} for more details. The below corresponds directly to their paper, with minor changes to notation. First, for any integer K, $0 \le K \le \frac{1}{2} C$ separate the items into 3 groups: 
+
+\[
+\begin{aligned}
+I_1 &= \left\{\, i \in \{1,\dots,n\} \;\middle|\; s_i > C - K \,\right\},\\
+I_2 &= \left\{\, i \in \{1,\dots,n\} \;\middle|\; C - K \ge s_i > \tfrac{1}{2}C \,\right\},\\
+I_3 &= \left\{\, i \in \{1,\dots,n\} \;\middle|\; \tfrac{1}{2}C \ge s_i \ge K \,\right\}.
+\end{aligned}
+\]
+
+
+Martello and Toth then give the following lower bound: 
+
+\[
+L(K)=|I_1|+|I_2|+\max\!\left\{0,\left\lceil
+\frac{\sum_{i\in I_3}s_i-\left(|I_2|C-\sum_{i\in I_2}s_i\right)}{C}
+\right\rceil\right\}.
+\]
+
+
+This is a valid bound for each possible value of K. The first two terms sum the weights of I1 and I2 since items in these groups are too large to fit in bins with each other so at the very least there must be one bin for each. The purpose of the third term is to consider the weight of those items in I3 as well as the space left by items in I2. The value of the bound is dependent on K, and so the best lower bound we can obtain is the maximum of the bounds each K value gives. To achieve the desired runtime, the weights must be sorted in decreasing order, then we consider just valid values for K which appear in the weights. The sum of the sizes of I1 and I2 is a constant, so calculate this once, and then for each value of k we just update the sum of I2 and I3 and increase the size of I2 as required (for the third term). Note, whilst this is the bound we decided to use there is a slightly better bound which makes use of dual feasible functions, arrived at by Fekete and Schepers \cite{fekete}. 
 
 \subsubsection{Code Complexity}
 This measure will aim to look at how hard it was to implement the algorithm and how elegant the code is. The number of lines of code used will be taken into account, but more important is how long it took to implement, if it required parameters to be tuned and how understandable the code is just by looking at it. 
@@ -226,14 +258,25 @@ P(i) = \frac{Q(i)}{\sum_{j=1}^{m} Q(j)}
 
 Q(i) represents the quality of the average solution given by $\alpha_i$ and P(i) is the probability of $\alpha_i$. We define avgcost(i) as the average cost of a solution given by $\alpha_i$ and $\ell$ is a learning rate we define. The learning rate is some value 0 $\le \ell <$ 1 which represents how aggressively we want to alter the probability. This is necessary as the difference between the average cost for each $\alpha$ tends to be very small for our normal cost definitions, so probabilities proportional to these would remain similar. By using this parameter, we can control the degree to which differences in cost are emphasised. In our implementation, we set $\ell = 0.995$ as this allowed for the probabilities to evolve over time without any one probability becoming too dominant, since this could reduce the ability of the algorithm to explore different areas of the search space. The local search phase uses the same tabu search we implemented earlier, except it uses just 1000 iterations.   
 
-\section{Comparison}
-
-\subsection{(GLS) }
+\subsection{Variable Neighbourhood Search (VNS)}
 
 \subsubsection{Overview}
+Introduced by Mladenović and Hansen \cite{mladenovic}, VNS works by systematically changing neighbourhoods during a perturbation phase (shaking) followed by a local search (often called the descent phase) \cite{gendreau}.  
 
+It requires defining neighbourhoods $N_{k}$, for $1 \le k \le k_{\max}$, where $k_{\max}$ is a parameter we specify. A neighbourhood $N_{k}$ could, for example, be defined to be $k$ moves away from the current solution. It is also important to choose a good objective function for the problem. In each iteration of the algorithm, we start with $k = 1$ and continue until $k = k_{\max}$. While $k \le k_{\max}$, we obtain a new candidate solution by shaking the incumbent solution, which is to say we move from the incumbent to a random solution in its $k$th neighbourhood. We then apply a local search to this new candidate solution, often using best improvement (which takes the direction of steepest descent) or first improvement (which selects the first move found that improves the solution). Naturally, best improvement is likely to be much more time consuming. After the local search, the solution arrived at is evaluated using the objective function and compared to the incumbent. If the solution is better than the incumbent, then it becomes the incumbent and $k$ is set to 1, otherwise increment $k$.  
+
+By exploring further neighbourhoods we increase our chances of escaping the current local optimum (we are less likely to return to the same one) and so can arrive at new, potentially better, local optima. It is worth noting the following fact from \cite{gendreau}: local minima w.r.t. one or several $N_{k}$ are relatively close. They then go on to explain that this implies local optima tend to contain information about the global optimum (since the global optimum is the local optimum for some neighbourhood(s)).  
 
 \subsubsection{implementation}
+We first run FFD to get our initial incumbent solution, though it should be noted that much of our implementation is based on the approach of Fleszar and Hindi \cite{fleszar}, which uses a different heuristic called minimum bin slack (MBS) that is superior to FFD \cite{gupta}. Fleszar and Hindi’s final VNS algorithm improves the solution arrived by their $\mathrm{MBS}'$ heuristic (a slight variation of MBS) in approximately 23\% of cases. We choose not to implement it here to save time but also so that the differences between the algorithms are clearer (since otherwise some might just return the solutions given by MBS). Additionally, FFD is more widely used.  
+
+The remainder of the algorithm is carried out the same as in \cite{fleszar} but we arrive at a different value for $k_{\max}$. We measure solution fitness as we’ve done previously as the sum of squared bin weights. We sort our items by weight in non-decreasing order as this allows us to gain some performance in our local search phase. When applying shaking to the incumbent solution, we maintain a list of items that have not been moved during the current shaking.  We carry out shaking by first selecting an item at random which has not yet been moved during that shaking. The selected item will be moved provided it can be (which is likely since there are usually possible swaps). Otherwise, it will be removed from our list of unmoved items and we try again by selecting another unmoved item at random. A move here is defined as any possible swap between two unmoved items or a transfer of a single unmoved item to a different bin. For a move to be valid, the capacity constraints must still be satisfied after carrying it out. Each of the items involved in a move are removed from the list of unmoved items so that for the current shaking they will not be moved again.  
+
+After shaking, we then carry out the local search phase which in our case is best improvement. Here we determine all possible moves which do not involve items from bins which are full and select the move which leads to the greatest improvement. The improvement is the difference between the fitness of the new solution and the previous one, which is calculated by considering only the bins where the weights change (since the sum of squared weights of all other bins is constant). This is repeated until there are no more moves that improve the solution fitness. Due to the fact we sorted our items in non-decreasing order by starting with the smallest item and iterating towards the largest we can improve performance. In the case of transferring items to a specific bin, we can stop as soon as we reach an item of weight greater than that of the available space. Similarly, if we wish to swap an item $i$, we stop when we reach an item $j$ ($j \neq i$) which has a weight exceeding the sum of item $i$'s weight and the space in the bin containing $i$. If these conditions aren’t met, then we simply go through every item in the list.   
+
+The algorithm terminates after the lower bound is reached or after 10 iterations. Each iteration ends when $k = k_{\max}$. We set $k_{\max}$ to 10 as this gave very good solutions without taking an unreasonable amount of time. 
+\section{Comparison}
+
 
 
 \begin{thebibliography}{00}
@@ -254,6 +297,12 @@ Q(i) represents the quality of the average solution given by $\alpha_i$ and P(i)
 \bibitem{wang} Wang, L., Shi, C., Du, S., Tao, Y., Shen, Y., Zheng, H., \& Qiu, X. (2024). Performance Review on LLM for solving leetcode problems. In 2024 4th International Symposium on Artificial Intelligence and Intelligent Manufacturing (AIIM) (pp. 1050--1054). \url{https://doi.org/10.1109/AIIM64537.2024.10934280} 
 
 \bibitem{coignion} Coignion, T., Quinton, C., \& Rouvoy, R. (2024). A Performance Study of LLM-Generated Code on Leetcode. In Proceedings of the 28th International Conference on Evaluation and Assessment in Software Engineering (pp. 79--89). Association for Computing Machinery, New York, NY, USA. \url{https://doi.org/10.1145/3661167.3661221} 
+
+\bibitem{martello} Silvano Martello, Paolo Toth, Lower bounds and reduction procedures for the bin packing problem, Discrete Applied Mathematics, Volume 28, Issue 1, 1990, Pages 59--70, ISSN 0166-218X, \url{https://doi.org/10.1016/0166-218X(90)90094-S}.
+
+\bibitem{gfgbound} GeeksforGeeks, 2024. Bin Packing Problem (Minimize number of used Bins). GeeksforGeeks. Last Updated: 2 Dec, 2024. Available at: \url{https://www.geeksforgeeks.org/dsa/bin-packing-problem-minimize-number-of-used-bins/}.
+
+\bibitem{fekete} Fekete, S. \& Schepers, J. New classes of fast lower bounds for bin packing problems. Math. Program. 91, 11--31 (2001). \url{https://doi.org/10.1007/s101070100243} 
 
 \bibitem{brownlee} Brownlee, J. (2021, October 12). A gentle introduction to stochastic optimization algorithms. Machine Learning Mastery. \url{https://machinelearningmastery.com/stochastic-optimization-for-machine-learning/}
 
@@ -284,6 +333,15 @@ Q(i) represents the quality of the average solution given by $\alpha_i$ and P(i)
 \bibitem{levine} Levine, J., \& Ducatelle, F. (2004). Ant colony optimization and local search for bin packing and cutting stock problems. Journal of the Operational Research Society, 55(7), 705–716. \url{https://doi.org/10.1057/palgrave.jors.2601771} 
 
 \bibitem{aaron} Aaron C. Zecchin, Angus R. Simpson, Holger R. Maier, Michael Leonard, Andrew J. Roberts, Matthew J. Berrisford, Application of two ant colony optimisation algorithms to water distribution system optimisation, Mathematical and Computer Modelling, Volume 44, Issues 5–6, 2006, Pages 451-468, ISSN 0895-7177, \url{https://doi.org/10.1016/j.mcm.2006.01.005} 
+
+\bibitem{mladenovic} N. Mladenovi{\'c}, P. Hansen, Variable neighborhood search, Computers \& Operations Research, Volume 24, Issue 11, 1997, Pages 1097--1100, ISSN 0305-0548, \url{https://doi.org/10.1016/S0305-0548(97)00031-2}.
+
+\bibitem{fleszar} Fleszar K, Hindi KS. New heuristics for one-dimensional bin-packing. Computers \& Operations Research. 2002;29(7):821--839. \url{https://doi.org/10.1016/S0305-0548(00)00082-4}
+
+\bibitem{gupta} Gupta JND, Ho JC. A new heuristic algorithm for the one-dimensional bin-packing problem. Production Planning \& Control. 1999;10(6):598--603. \url{https://doi.org/10.1080/095372899232894}
+
+
+
 
 \end{thebibliography}
 \end{document}

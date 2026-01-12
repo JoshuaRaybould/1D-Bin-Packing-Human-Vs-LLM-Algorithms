@@ -1,5 +1,6 @@
 from pathlib import Path
 from pathlib import PurePosixPath
+from algorithms.helpers import getLowerBound
 import math
 import numpy as np
 import csv
@@ -135,9 +136,9 @@ def getOurRandomInstances(numInstances, capacity, numItems, distribution):
         weights.sort()
         weights = (np.round(weights)).astype(int)
         instanceInfo["weights"] = weights.tolist()
-        totalWeight = sum(instanceInfo["weights"])
+        #totalWeight = sum(instanceInfo["weights"])
 
-        instanceInfo["optimal_solution"] = math.ceil(totalWeight/capacity)
+        instanceInfo["optimal_solution"] = getLowerBound(instanceInfo["weights"], instanceInfo["bin_capacity"]) #math.ceil(totalWeight/capacity)
 
         instances.append(instanceInfo)
 

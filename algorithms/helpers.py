@@ -1,0 +1,146 @@
+import random
+import math
+
+# if index is true we put the index of the item in the packing rather than its weight
+def firstFit(binCapacity, weights, decreasing, index):
+    bins = {}
+    bins["packing"], bins["bin_weights"] = [], []
+
+    if decreasing:
+        weights.sort(reverse=True)
+    else:
+        random.shuffle(weights)
+        
+    for x in range(0, len(weights)):
+        weight = weights[x]
+
+        valueToPutInPacking = weight
+        if index:
+            valueToPutInPacking = x
+        packed = False
+
+        for b in range(0, len(bins["bin_weights"])):
+            if bins["bin_weights"][b] + weight <= binCapacity:
+                bins["packing"][b].append(valueToPutInPacking)
+                bins["bin_weights"][b] += weight
+                packed = True
+                break
+
+        if not packed:
+            bins["packing"].append([valueToPutInPacking])
+            bins["bin_weights"].append(weight)
+
+
+    return bins
+
+
+
+def getStoppingSum(weights):
+    uniqueLen = len(set(weights))
+    stoppingVal = 0
+    for x in range(len(weights) - 1, len(weights) - uniqueLen - 1, -1):
+        stoppingVal += weights[x]
+    return stoppingVal
+
+# Martello and Toth's lower bound
+def getLowerBound(weights, binCapacity):
+    # We sort in case
+    weightsCopy = weights.copy()
+    weightsCopy.sort(reverse=True)
+
+    k = 0
+    curkIndex = -1
+
+    I1andI2Const = 0 
+    I2Size = 0
+    I2Sum = 0
+    I3Sum = 0
+
+    lowerBound = 0
+
+    I2Pos = -1
+
+    index = 0
+
+    stoppingSum = getStoppingSum(weightsCopy)
+    while index < len(weightsCopy):
+        if weightsCopy[index] <= binCapacity/2:
+            curkIndex = index
+            index += 1
+            while index < len(weightsCopy) and weightsCopy[index] == weightsCopy[curkIndex]:
+                curkIndex = index
+                index += 1
+
+            # Determine I1 and I2 Size
+            I1Size = 0
+            for x in range(0, len(weightsCopy)):
+                if weightsCopy[x] > binCapacity - weightsCopy[curkIndex]:
+                    I1Size += 1
+                elif weightsCopy[x] > binCapacity/2:
+                    if I2Pos == -1:
+                        I2Pos = x
+                    I2Size += 1
+                    I2Sum += weightsCopy[x]
+                elif weightsCopy[x] >= weightsCopy[curkIndex]:
+                    if I2Pos == -1:
+                        I2Pos = x
+                    I3Sum += weightsCopy[x]
+                else:
+                    break
+            
+            I1andI2Const = I1Size + I2Size
+            break
+        index += 1
+
+    smallItemTerm = (I3Sum - (I2Size * binCapacity - I2Sum))/binCapacity
+    lowerBound = I1andI2Const + max(0, math.ceil(smallItemTerm))
+
+    stoppingSmallTerm = (stoppingSum - (I2Size * binCapacity - I2Sum))/binCapacity
+    stoppingPoint = I1andI2Const + math.ceil(stoppingSmallTerm)
+
+    if stoppingPoint <= lowerBound:
+                return lowerBound
+
+    startPoint = curkIndex + 1
+
+    # In this case all items are bigger than 1/2 capacity so each needs their own bin
+    # (this should not be the case for our instances)
+    if index == len(weightsCopy):
+        print("Does your instance have very large items?")
+        return len(weightsCopy)
+    else:
+        while startPoint < len(weightsCopy):
+            curkIndex = startPoint
+            k = weightsCopy[curkIndex]
+            I3Sum += k
+
+            curkIndex += 1
+
+            while curkIndex < len(weightsCopy) and weightsCopy[curkIndex] == weightsCopy[startPoint]:
+                I3Sum += k
+                startPoint = curkIndex
+                curkIndex += 1
+
+            I2Max = binCapacity - k
+
+            while I2Pos > 0 and weightsCopy[I2Pos - 1] <= I2Max:
+                I2Size += 1
+                I2Sum += weightsCopy[I2Pos - 1]
+                I2Pos -= 1
+
+            smallItemTerm = (I3Sum - (I2Size * binCapacity - I2Sum))/binCapacity
+            lowerBound = I1andI2Const + max(0, math.ceil(smallItemTerm))
+            
+            stoppingSmallTerm = (stoppingSum - (I2Size * binCapacity - I2Sum))/binCapacity
+            stoppingPoint = I1andI2Const + math.ceil(stoppingSmallTerm)
+
+            if stoppingPoint <= lowerBound:
+                return lowerBound
+            
+            startPoint = curkIndex
+        return lowerBound
+
+
+
+
+

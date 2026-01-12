@@ -1,7 +1,7 @@
 import pickle
 import math
 import random
-from . import first_fit
+from . import helpers
 
 def determineBest(bestSolution, candidateSolution):
    bestSolScore = 0
@@ -61,7 +61,7 @@ def tabuSearch(binCapacity, weights, candidateSolution, fastSearch):
    bestSolution = candidateSolution
 
    # We can use the lower bound as a way to check if we have arrived at the ideal solution (though it may not be achievable)
-   lowerBound = math.ceil(sum(weights)/binCapacity)
+   lowerBound = helpers.getLowerBound(weights, binCapacity)
    totalIterations = 10000
    if fastSearch:
       totalIterations = 1000
@@ -218,12 +218,15 @@ def tabuSearch(binCapacity, weights, candidateSolution, fastSearch):
    print(len(tabuList))
    print("end")"""
 
+   if len(bestSolution["packing"]) == lowerBound:
+      print("WOOOOOW")
+
    return determineBest(bestSolution, candidateSolution)
 
 def tabuSearchFFD(binCapacity, weights):
-    candidateSolution = first_fit.firstFit(binCapacity, weights, True)
+    candidateSolution = helpers.firstFit(binCapacity, weights, True, False)
     return tabuSearch(binCapacity, weights, candidateSolution, False)
 
 def tabuSearchFF(binCapacity, weights):
-    candidateSolution = first_fit.firstFit(binCapacity, weights, False)
+    candidateSolution = helpers.firstFit(binCapacity, weights, False, False)
     return tabuSearch(binCapacity, weights, candidateSolution, False)
