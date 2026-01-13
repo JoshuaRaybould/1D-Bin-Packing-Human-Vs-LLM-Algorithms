@@ -30,9 +30,44 @@ def firstFit(binCapacity, weights, decreasing, index):
             bins["packing"].append([valueToPutInPacking])
             bins["bin_weights"].append(weight)
 
-
     return bins
 
+# As the above implementation but puts indexes into bins 
+# Also gives us a way to quickly determine the bin an item is in 
+# This is necessary to distinguish items of same weight in some cases
+def firstFitWithContainingBin(binCapacity, weights, decreasing):
+    bins = {}
+    bins["packing"], bins["bin_weights"], bins["containing_bin"] = [], [], {}
+
+    indexes = []
+    # items are labelled 0 up to len(weights) - 1
+    # From https://stackoverflow.com/questions/18265935/how-do-i-create-a-list-with-numbers-between-two-values
+    indexes = list(range(0, len(weights)))
+    if decreasing:
+        weights.sort(reverse=True)
+    else:
+        random.shuffle(indexes)
+
+    for x in range(0, len(indexes)):
+        weight = weights[indexes[x]]
+
+        valueToPutInPacking = indexes[x]
+        packed = False
+
+        for b in range(0, len(bins["bin_weights"])):
+            if bins["bin_weights"][b] + weight <= binCapacity:
+                bins["packing"][b].append(valueToPutInPacking)
+                bins["bin_weights"][b] += weight
+                bins["containing_bin"][indexes[x]] = b
+                packed = True
+                break
+
+        if not packed:
+            bins["packing"].append([valueToPutInPacking])
+            bins["bin_weights"].append(weight)
+            bins["containing_bin"][indexes[x]] = len(bins["bin_weights"]) - 1
+
+    return bins
 
 
 def getStoppingSum(weights):
