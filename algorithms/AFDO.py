@@ -13,34 +13,36 @@ def applyPace(currentSolution, weights, binCapacity, fitness, solIndex, pace):
         otherBinWeight = currentSolution["bin_weights"][otherBinIndex] 
 
         if otherBinWeight + itemWeight <= binCapacity:
-            oldCurBinWeight = currentSolution["bin_weights"][curBinIndex]
-            currentSolution["packing"][curBinIndex].remove(itemIndex)
-            currentSolution["bin_weights"][curBinIndex] -= itemWeight
+            if otherBinIndex < len(currentSolution["packing"]):
 
-            # If bin empty remove it
-            if not currentSolution["packing"][curBinIndex]:
-                print("REMOVAL")
-                currentSolution["packing"].pop(curBinIndex)
-                for containingBin in currentSolution["containing_bin"]:
-                    if currentSolution["containing_bin"][containingBin] > curBinIndex:
-                        currentSolution["containing_bin"][containingBin] -= 1
-
-            newCurBinWeight = currentSolution["bin_weights"][curBinIndex]
+                oldCurBinWeight = currentSolution["bin_weights"][curBinIndex]
+                currentSolution["packing"][curBinIndex].remove(itemIndex)
+                currentSolution["bin_weights"][curBinIndex] -= itemWeight
+                newCurBinWeight = currentSolution["bin_weights"][curBinIndex]
 
 
-            oldOtherBinWeight = currentSolution["bin_weights"][otherBinIndex]
-            currentSolution["packing"][otherBinIndex].append(itemIndex)
-            currentSolution["bin_weights"][otherBinIndex] += itemWeight
-            currentSolution["containing_bin"][itemIndex] = otherBinIndex
-            newOtherBinWeight = currentSolution["bin_weights"][otherBinIndex]
+                oldOtherBinWeight = currentSolution["bin_weights"][otherBinIndex]
+                currentSolution["packing"][otherBinIndex].append(itemIndex)
+                currentSolution["bin_weights"][otherBinIndex] += itemWeight
+                currentSolution["containing_bin"][itemIndex] = otherBinIndex
+                newOtherBinWeight = currentSolution["bin_weights"][otherBinIndex]
 
-            prevFitnessTerm = oldCurBinWeight * oldCurBinWeight + oldOtherBinWeight * oldOtherBinWeight
-            newFitnessTerm = newCurBinWeight * newCurBinWeight + newOtherBinWeight * newOtherBinWeight
+                prevFitnessTerm = oldCurBinWeight * oldCurBinWeight + oldOtherBinWeight * oldOtherBinWeight
+                newFitnessTerm = newCurBinWeight * newCurBinWeight + newOtherBinWeight * newOtherBinWeight
 
-            fitness[solIndex] += (newFitnessTerm - prevFitnessTerm)
+                fitness[solIndex] += (newFitnessTerm - prevFitnessTerm)
+    
+    for x in range(0, len(currentSolution)):
+        # If bin empty remove it
+        if not currentSolution["packing"][x]:
+            currentSolution["packing"].pop(x)
+            for containingBin in currentSolution["containing_bin"]:
+                if currentSolution["containing_bin"][containingBin] > x:
+                    currentSolution["containing_bin"][containingBin] -= 1
 
 def calcFitness(population, fitness):
     maxFitnessIndex = 0
+    minFitnessIndex = 0
 
     for x in range(0, len(population)):
         curFitness = 0
@@ -49,11 +51,15 @@ def calcFitness(population, fitness):
         fitness.append(curFitness)
         if curFitness >= fitness[maxFitnessIndex]:
             maxFitnessIndex = x
-    return maxFitnessIndex
+        if curFitness <= fitness[minFitnessIndex]:
+            minFitnessIndex = x
+    return (maxFitnessIndex, minFitnessIndex)
 
 def adaptiveFDO(binCapacity, weights):
-    populationSize = 30
+    populationSize = 20
     population = []
+
+    lowerBound = helpers.getLowerBound(weights, binCapacity)
 
     numItems = len(weights)
     for _ in range(0, populationSize):
@@ -61,18 +67,25 @@ def adaptiveFDO(binCapacity, weights):
 
     wf = 0
     fitness = []
-    maxFitnessIndex = calcFitness(population, fitness)
+    (maxFitnessIndex, minFitnessIndex) = calcFitness(population, fitness)
     maxFitness = fitness[maxFitnessIndex]
+    minFitness = fitness[minFitnessIndex]
     
     bestSolution = pickle.loads(pickle.dumps(population[maxFitnessIndex], -1)) 
     newBestSolution = []
     iteration = 0
-    maxIterations = 100
-    while iteration < maxIterations:
+    maxIterations = 150
+    while iteration < maxIterations and len(bestSolution["packing"]) != lowerBound:
+
+        # Set worst solution to global best
+        population[minFitnessIndex] = pickle.loads(pickle.dumps(bestSolution, -1))
+        fitness[minFitnessIndex] = maxFitness
+        minFitnessIndex = -1
+        minFitness = float("infinity") # We will need to determine which is the minimum in our population after the iteration
 
         fws = []
         for x in range(0, len(population)):
-            fw = (fitness[x]/fitness[maxFitnessIndex]) - wf
+            fw = (fitness[x]/maxFitness) - wf
             fws.append(fw)
 
         # Now move each bee
@@ -100,9 +113,6 @@ def adaptiveFDO(binCapacity, weights):
                         pace.append((itemIndex, curBinIndex, chosenBinIndex))
                 
                 applyPace(currentSolution, weights, binCapacity, fitness, x, pace)
-                if fitness[x] > maxFitness:
-                    maxFitness = fitness[x]
-                    newBestSolution = currentSolution
 
             else:
                 currentSolution = population[x]
@@ -111,13 +121,11 @@ def adaptiveFDO(binCapacity, weights):
                 # Determine pace
                 pace = []
                 items = list(range(0, numItems))
-                itemIndexesToMove = []
                 i = 0
                 while i < tasks:
                     if items:
                         itemIndex = random.choice(items)
                         items.remove(itemIndex)
-                        itemIndexesToMove.append(itemIndex)
 
                         # Form the vectors describing the moves using the item's bins
                         curItemBin = currentSolution["containing_bin"][itemIndex]
@@ -129,12 +137,15 @@ def adaptiveFDO(binCapacity, weights):
                         break
                 
                 applyPace(currentSolution, weights, binCapacity, fitness, x, pace)
-                if fitness[x] > maxFitness:
-                    maxFitness = fitness[x]
-                    newBestSolution = currentSolution
+
+            if fitness[x] > maxFitness:
+                maxFitness = fitness[x]
+                newBestSolution = currentSolution
+            elif fitness[x] < minFitness:
+                minFitness = fitness[x]
+                minFitnessIndex = x
 
         if newBestSolution:
-            print("IMPROVE")
             bestSolution = pickle.loads(pickle.dumps(newBestSolution, -1)) 
             newBestSolution = []
         iteration += 1
