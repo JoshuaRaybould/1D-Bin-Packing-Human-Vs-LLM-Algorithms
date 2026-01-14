@@ -1,9 +1,39 @@
 from pathlib import Path
 from pathlib import PurePosixPath
 from algorithms.helpers import getLowerBound
-import math
 import numpy as np
 import csv
+
+def loadNoSolInstances(instancesDir):
+
+    # Instances will include the number of items, bin capacity, solution and the weight for each item
+    instances = []
+    for instanceFile in instancesDir.iterdir():
+
+        if instanceFile.is_file():
+            fileName = PurePosixPath(instanceFile).name
+            instanceInfo = {}
+            instanceInfo["weights"] = []
+            instanceInfo["file_name"] = fileName
+
+            with instanceFile.open() as f:
+                i = 0
+                line = f.readline()
+                while line:
+                    val = int(line)
+                    if i == 0:
+                        instanceInfo["number_of_items"] = val
+                    elif i == 1:
+                        instanceInfo["bin_capacity"] = val
+                    else:
+                        instanceInfo["weights"].append(val)
+
+                    line = f.readline()
+                    i += 1
+            instanceInfo["optimal_solution"] = getLowerBound(instanceInfo["weights"], instanceInfo["bin_capacity"])
+            instances.append(instanceInfo)
+    
+    return instances
 
 # Load instances from a specific given dataset
 def loadInstances(instancesDir, solutions, solvedOnly):
@@ -25,7 +55,6 @@ def loadInstances(instancesDir, solutions, solvedOnly):
         if instanceFile.is_file():
             fileName = PurePosixPath(instanceFile).name
             if fileName not in sols:
-                # print("Skipping")
                 continue
             instanceInfo = {}
             instanceInfo["weights"] = []
@@ -49,7 +78,7 @@ def loadInstances(instancesDir, solutions, solvedOnly):
                     line = f.readline()
                     i += 1
             instances.append(instanceInfo)
-
+    
     return instances
 
 
@@ -84,6 +113,10 @@ def getHardInstances(version, solvedOnly):
         instancesDir = Path("./Instances/Difficult_Instances/ANI")
         ANISolutions = Path("./Instances/Solutions/ANISolutions.csv")
         return loadInstances(instancesDir, ANISolutions, solvedOnly)
+
+def particleSwarmTest():
+    instancesDir = Path("./Instances/BinPacking_OMP")
+    return loadNoSolInstances(instancesDir)
 
 
 

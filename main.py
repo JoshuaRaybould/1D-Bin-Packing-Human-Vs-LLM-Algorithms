@@ -2,9 +2,9 @@ from utilities import load_data
 from utilities import test_correctness
 from enum import Enum
 import time
-from algorithms import randomised_best_fit, simulated_annealing, grouping_genetic_algorithm, tabu_search, ant_colony_optimisation, GRASP, variable_neighbourhood_search
+from algorithms import randomised_best_fit, simulated_annealing, grouping_genetic_algorithm, tabu_search, ant_colony_optimisation, GRASP, variable_neighbourhood_search, AFDO
 
-algorithmOptions = [randomised_best_fit.randomisedBestFit, simulated_annealing.simulatedAnnealingFF, simulated_annealing.simulatedAnnealingFFD, tabu_search.tabuSearchFF, tabu_search.tabuSearchFFD, grouping_genetic_algorithm.groupingGeneticAlgorithm, ant_colony_optimisation.antColonyOptimisation, GRASP.reactiveGRASP, variable_neighbourhood_search.variableNeighbourhoodSearchFFD]
+algorithmOptions = [randomised_best_fit.randomisedBestFit, simulated_annealing.simulatedAnnealingFF, simulated_annealing.simulatedAnnealingFFD, tabu_search.tabuSearchFF, tabu_search.tabuSearchFFD, grouping_genetic_algorithm.groupingGeneticAlgorithm, ant_colony_optimisation.antColonyOptimisation, GRASP.reactiveGRASP, variable_neighbourhood_search.variableNeighbourhoodSearchFFD, AFDO.adaptiveFDO]
 chosenAlgorithm = algorithmOptions[-1]
 
 class Mode(Enum):
@@ -13,11 +13,11 @@ class Mode(Enum):
    CHOOSE = 2
    SMALL = 3
 
-modeOfOperation = Mode.SMALL
+modeOfOperation = Mode.DEFAULT
 done = False
 while not done:
    done = True
-   selection = int(input("Type a number 1-7: "))
+   selection = int(input("Type a number 1-8: "))
 
    if selection == 1:
       instances = load_data.getRandomInstances()
@@ -35,6 +35,8 @@ while not done:
    elif selection == 7:
       instances = load_data.getRandomInstances()
       test = True
+   elif selection == 8:
+      instances = load_data.particleSwarmTest()
    else:
       done = False
 
