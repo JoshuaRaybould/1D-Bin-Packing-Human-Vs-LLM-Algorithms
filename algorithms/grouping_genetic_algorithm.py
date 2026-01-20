@@ -29,24 +29,34 @@ def doesEncodingMakeSense(encoding, groupIndex):
             print(encoding)
             break
 
-def randomisedFirstFitEncoded(binCapacity, weights):
-    global totalTimeFitting
-    binGroups = {}
-    binWeights = {}
-    # First len(weights) indexes correspond to items
-    # The value stored at the index corresponds to the bin the item is in
-    encoding = [0] * len(weights)
-    # We can't directly shuffle the weights since they are used for every instance
+def preAllocateItems(binCapacity, weights, binGroups, binWeights, encoding):
+    binGroups[0] = [0]
+    binWeights[0] = weights[0]
+    curBin = 0
+    encoding[0] = 0
+
+    for x in range(1, len(weights)):
+        if weights[x] + binWeights[curBin] > binCapacity:
+            curBin += 1
+            binGroups[curBin] = [x]
+            binWeights[curBin] = weights[x]
+            encoding[x] = curBin
+        else:
+            return x
+        
+    return len(weights)
+
+def randomisedFirstFitEncoded(binCapacity, weights, binGroups, binWeights, encoding, numPreAllocated):
+    # We don't directly shuffle the weights since they are used for every instance
     itemOrder = []
-    for x in range(0, len(weights)):
+    # Only deal with items not already allocated
+    for x in range(numPreAllocated, len(weights)):
         itemOrder.append(x)
     random.shuffle(itemOrder)
 
     for index in itemOrder:
         packed = False
         for b in range(0, len(binGroups)):
-            if b not in binWeights:
-                binWeights[b] = 0
 
             if binWeights[b] + weights[index] <= binCapacity:
                 binWeights[b] += weights[index]
@@ -56,9 +66,10 @@ def randomisedFirstFitEncoded(binCapacity, weights):
                 break
 
         if not packed:
-            encoding[index] = len(binGroups)
-            binGroups[len(binGroups)] = [index]
-            binWeights[len(binGroups)] = weights[index]
+            groupIndex = len(binGroups)
+            encoding[index] = groupIndex
+            binGroups[groupIndex] = [index]
+            binWeights[groupIndex] = weights[index]
 
     fullEncoding = {}
     fullEncoding["encoding"] = encoding
@@ -252,16 +263,25 @@ def scoreFitnesses(weights, population, fitness):
 
 
 def groupingGeneticAlgorithm(binCapacity, weights):
-    global totalTimeFitting
 
     populationSize = 20
     population = []
 
-    start = time.perf_counter()
-    # To generate our initial population we will apply first fit to a random order of weights
-    for x in range(0, populationSize):
-        population.append(randomisedFirstFitEncoded(binCapacity, weights))
-    totalTimeFitting += (time.perf_counter() - start)
+    weights.sort(reverse=True)
+
+    binGroups = {}
+    binWeights = {}
+    # The value stored at the index corresponds to the bin the item is in
+    encoding = [0] * len(weights)
+
+    numPreAllocated = preAllocateItems(binCapacity, weights, binGroups, binWeights, encoding)
+    # To generate our initial population we will apply first with with pre-allocated items
+    # We first pack the large items, then have the remaining weights in random order and apply first fit
+    for _ in range(0, populationSize):
+        curBinGroups = pickle.loads(pickle.dumps(binGroups, -1)) 
+        curBinWeights = binWeights.copy()
+        curEncoding = encoding.copy()
+        population.append(randomisedFirstFitEncoded(binCapacity, weights, curBinGroups, curBinWeights, curEncoding, numPreAllocated))
 
     best = 0
     bestFitness = float("inf")
@@ -323,6 +343,6 @@ def groupingGeneticAlgorithm(binCapacity, weights):
             bins["packing"][-1].append(weights[i])
             bins["bin_weights"][-1] += weights[i]
     
-    print(totalTimeFitting)
+    #print(totalTimeFitting)
 
     return bins
