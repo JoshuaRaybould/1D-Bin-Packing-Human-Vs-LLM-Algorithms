@@ -80,36 +80,163 @@ def getFirstUnusedGroupIndex(child):
             return i
         i += 1
 
-def firstFitDecreasing(child, unassignedItems, weights, binCapacity):
+def rearrangeByPairs(child, unassignedItems, weights, binCapacity):
     global totalTimeFitting
-    itemWeightPairs = []
+    # print("Rearrange start")
+
+    # Randomise bin order
+    binGroupsIndex = list(range(0, len(child["bin_groups"])))
+
+    #print(len(child["bin_groups"]))
+    #print(len(child["bin_order"]))
+    #print(child["bin_groups"])
+    #print(child["bin_order"])
+    #print(binGroupsIndex)
+    random.shuffle(binGroupsIndex)
+    newUnassignedItems = []
+    numNewBins = 0
+    foundMove = False 
+    
+    j = 0
+    while j < len(unassignedItems):
+        foundMove = False
+        for x in range(j + 1, len(unassignedItems)):
+
+            if foundMove:
+                    break
+            
+            itemj = unassignedItems[j]
+            itemx = unassignedItems[x]
+            itemjWeight = weights[itemj]
+            itemxWeight = weights[itemx]
+            sumWeightsToSwap = itemjWeight + itemxWeight
+
+            for binIndex in binGroupsIndex:
+
+                if foundMove:
+                    break
+
+                actualBinIndex = child["bin_order"][binIndex]
+                curBin = child["bin_groups"][actualBinIndex]
+                binWeights = child["bin_weights"]
+                binWeight = binWeights[actualBinIndex]
+
+                # Go through each pair in the bins until we can swap or have went through all pairs
+                for i in range(0, len(curBin)):
+
+                    if foundMove:
+                        break
+
+                    for k in range(i + 1, len(curBin)):
+                        itemi = curBin[i]
+                        itemk = curBin[k]
+                        itemiWeight = weights[itemi]
+                        itemkWeight = weights[itemk]
+
+                        if itemjWeight >= itemiWeight + itemkWeight and (binWeight - (itemiWeight + itemkWeight)) + itemjWeight <= binCapacity:
+                            # print("Enter if")
+                            # print(unassignedItems)
+                            # print(j)
+                            newUnassignedItems.append(itemi)
+                            newUnassignedItems.append(itemk)
+                            curBin.remove(itemi)
+                            curBin.remove(itemk)
+                            curBin.append(itemj)
+                            child["encoding"][itemj] = actualBinIndex
+
+                           # print("weight and changes")
+                            #print(binWeights[actualBinIndex])
+                            mutateStartWeight = 0
+                            for binIndex in child["bin_weights"]:
+                                mutateStartWeight += child["bin_weights"][binIndex]
+                           # print(mutateStartWeight)
+                            child["bin_weights"][actualBinIndex] = (binWeight - (itemiWeight + itemkWeight)) + itemjWeight
+                            #print(binWeights[actualBinIndex])
+                            mutateStartWeight = 0
+                            for binIndex in child["bin_weights"]:
+                                mutateStartWeight += child["bin_weights"][binIndex]
+                            #print(mutateStartWeight)
+                            unassignedItems.pop(j)
+                            foundMove = True
+                            break                          
+                        elif itemxWeight >= itemiWeight + itemkWeight and (binWeight - (itemiWeight + itemkWeight)) + itemxWeight <= binCapacity:
+                            newUnassignedItems.append(itemi)
+                            newUnassignedItems.append(itemk)
+                            curBin.remove(itemi)
+                            curBin.remove(itemk)
+                            curBin.append(itemx)
+                            child["encoding"][itemx] = actualBinIndex
+                            binWeights[actualBinIndex] = (binWeight - (itemiWeight + itemkWeight)) + itemxWeight
+                            unassignedItems.pop(x)
+                            foundMove = True
+                            break
+                        elif sumWeightsToSwap >= itemiWeight + itemkWeight and (binWeight - (itemiWeight + itemkWeight)) + sumWeightsToSwap <= binCapacity:
+                            newUnassignedItems.append(itemi)
+                            newUnassignedItems.append(itemk)
+                            curBin.remove(itemi)
+                            curBin.remove(itemk)
+                            curBin.append(itemj)
+                            curBin.append(itemx)
+                            child["encoding"][itemj] = actualBinIndex
+                            child["encoding"][itemx] = actualBinIndex
+                            binWeights[actualBinIndex] = (binWeight - (itemiWeight + itemkWeight)) + sumWeightsToSwap
+                            unassignedItems.pop(x)
+                            unassignedItems.pop(j)
+                            foundMove = True
+                            break
+                    
+        if not foundMove:
+            j += 1
+    
+    # print("mid method")
+    mutateStartWeight = 0
+    for binIndex in child["bin_weights"]:
+        mutateStartWeight += child["bin_weights"][binIndex]
+    """print(mutateStartWeight)
+    print(unassignedItems)
+    print(newUnassignedItems)
+    print("end mid method")"""
+
     for unassignedItem in unassignedItems:
-        pair = [weights[unassignedItem], unassignedItem]
-        itemWeightPairs.append(pair)
-
-    # https://stackoverflow.com/questions/25432182/sorting-an-array-of-arrays-in-python
-    itemWeightPairs = sorted(itemWeightPairs, key=lambda x: x[0], reverse=True)
-
-    for i in range(0, len(itemWeightPairs)):
+        newUnassignedItems.append(unassignedItem)
+    unassignedItems = newUnassignedItems
+    """print(unassignedItems)
+    sumOfUnassigned = 0
+    for item in unassignedItems:
+        sumOfUnassigned += weights[item]
+    print(sumOfUnassigned)
+    print("If we add back unassigned we get")
+    print(sumOfUnassigned + mutateStartWeight)"""
+    
+    for itemIndex in unassignedItems:
+        itemWeight = weights[itemIndex]
         packed = False
-        itemIndex = itemWeightPairs[i][1]
 
         for groupIndex in child["bin_groups"]:
-            binWeight = 0
-            for j in child["bin_groups"][groupIndex]:
-                print(groupIndex)
-                binWeight += weights[j]
+            binWeight = child["bin_weights"][groupIndex]
 
-            if binWeight + weights[itemIndex] <= binCapacity:
+            if itemWeight + binWeight <= binCapacity:
                 child["encoding"][itemIndex] = groupIndex
                 child["bin_groups"][groupIndex].append(itemIndex)
+                child["bin_weights"][groupIndex] += weights[itemIndex]
                 packed = True
                 break
 
         if not packed:
-            label = getFirstUnusedGroupIndex(child)
+            label = len(child["bin_groups"])
+            while label in child["bin_groups"]:
+                label += 1
+      
             child["encoding"][itemIndex] = label
             child["bin_groups"][label] = [itemIndex]
+            child["bin_weights"][label] = weights[itemIndex]
+            child["bin_order"].append(label)
+
+            numNewBins += 1
+    mutateStartWeight = 0
+    for binIndex in child["bin_weights"]:
+        mutateStartWeight += child["bin_weights"][binIndex]
+                        
     return child
 
 def fillGroup(parent1, parent2Groups, unassignedItems1):
@@ -197,13 +324,17 @@ def crossover(parent1, parent2, weights, binCapacity):
 def mutate(child, weights, binCapacity):
 
     unassignedItems = []
+
     mutateStartWeight = 0
-    for groupIndex in child["bin_groups"]:
+    for binIndex in child["bin_weights"]:
+        mutateStartWeight += child["bin_weights"][binIndex]
+
+    """for groupIndex in child["bin_groups"]:
         for j in child["bin_groups"][groupIndex]:
-            mutateStartWeight += weights[j]
+            mutateStartWeight += weights[j]"""
     
     childBinOrder = child["bin_order"]
-    print(childBinOrder)
+    #print(childBinOrder)
 
     emptiestBin = childBinOrder[-1]
     childBinOrder.pop(-1)
@@ -217,24 +348,48 @@ def mutate(child, weights, binCapacity):
         binToDelete = childBinOrder.pop(indexOfBinToDelete)
         binsToDelete.append(binToDelete)
     
+    unassignedItems = []
+    descending = False
     # Remove the bins, we then run FFD to put the items back into groups
-    """for binToDelete in binsToDelete:
-        child["bin_groups"]
+    for binToDelete in binsToDelete:
+        curRemovedItems = child["bin_groups"].pop(binToDelete)
+        child["bin_weights"].pop(binToDelete)
+        for removedItem in curRemovedItems:
+            if weights[removedItem] >= binCapacity/2:
+                descending = True
+            unassignedItems.append(removedItem) 
+    #print(unassignedItems)
+    """    
     for groupIndex in child["bin_groups"]:
         if i == b:
             unassignedItems = child["bin_groups"].pop(groupIndex)
             break
         i += 1"""
+    
+    if descending:
+        unassignedItems.sort(key=lambda itemIndex: weights[itemIndex], reverse=True)
+    else:
+        random.shuffle(unassignedItems)
 
-    child = firstFitDecreasing(child, unassignedItems, weights, binCapacity)
+    """print("START weight " + str(mutateStartWeight))
+    preRearrangeWeight = 0
+    for binIndex in child["bin_weights"]:
+        preRearrangeWeight += child["bin_weights"][binIndex]
+    print("pre weight " + str(preRearrangeWeight))"""
+    rearrangeByPairs(child, unassignedItems, weights, binCapacity)
 
     mutateEndWeight = 0
-    for groupIndex in child["bin_groups"]:
+    for binIndex in child["bin_weights"]:
+        mutateEndWeight += child["bin_weights"][binIndex]
+
+    """for groupIndex in child["bin_groups"]:
         for j in child["bin_groups"][groupIndex]:
-            mutateEndWeight += weights[j]
+            mutateEndWeight += weights[j]"""
 
     if mutateStartWeight != mutateEndWeight:
         print("ERROR: weight changed during mutation")
+        print("START weight " + str(mutateStartWeight))
+        print("END weight " + str(mutateEndWeight))
 
     return child
 
@@ -288,7 +443,7 @@ def groupingGeneticAlgorithm(binCapacity, weights):
         population.append(randomisedFirstFitEncoded(binCapacity, weights, curBinGroups, curBinWeights, curEncoding, numPreAllocated))
 
         # Get the bins in descending order - necessary for mutation and crossover
-        descendingBinGroups = list(range(0, len(binGroups)))
+        descendingBinGroups = list(range(0, len(curBinGroups)))
         descendingBinGroups.sort(key=lambda group: curBinWeights[group], reverse=True)
         population[-1]["bin_order"] = descendingBinGroups
 
@@ -304,7 +459,7 @@ def groupingGeneticAlgorithm(binCapacity, weights):
     i = 0
     lowerBound = helpers.getLowerBound(weights, binCapacity)
     
-    while i < 600 and bestBins > lowerBound:
+    while i < 100 and bestBins > lowerBound:
 
         #print(bestFitness)
         i += 1
@@ -319,6 +474,7 @@ def groupingGeneticAlgorithm(binCapacity, weights):
             # Crossover is expensive so we are going to do it 10% of the time
             prob = random.random()
 
+            
             parentCopy1 = pickle.loads(pickle.dumps(population[parent1Index], -1))
             parentCopy2 = pickle.loads(pickle.dumps(population[parent2Index], -1))
 
