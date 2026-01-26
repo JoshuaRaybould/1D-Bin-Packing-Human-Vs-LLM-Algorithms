@@ -103,7 +103,7 @@ def rearrangeByPairs(child, unassignedItems, weights, binCapacity):
         for x in range(j + 1, len(unassignedItems)):
 
             if foundMove:
-                    break
+                break
             
             itemj = unassignedItems[j]
             itemx = unassignedItems[x]
@@ -120,6 +120,8 @@ def rearrangeByPairs(child, unassignedItems, weights, binCapacity):
                 curBin = child["bin_groups"][actualBinIndex]
                 binWeights = child["bin_weights"]
                 binWeight = binWeights[actualBinIndex]
+                if binWeight == binCapacity:
+                    continue
 
                 # Go through each pair in the bins until we can swap or have went through all pairs
                 for i in range(0, len(curBin)):
@@ -146,15 +148,10 @@ def rearrangeByPairs(child, unassignedItems, weights, binCapacity):
 
                            # print("weight and changes")
                             #print(binWeights[actualBinIndex])
-                            mutateStartWeight = 0
-                            for binIndex in child["bin_weights"]:
-                                mutateStartWeight += child["bin_weights"][binIndex]
+        
                            # print(mutateStartWeight)
                             child["bin_weights"][actualBinIndex] = (binWeight - (itemiWeight + itemkWeight)) + itemjWeight
                             #print(binWeights[actualBinIndex])
-                            mutateStartWeight = 0
-                            for binIndex in child["bin_weights"]:
-                                mutateStartWeight += child["bin_weights"][binIndex]
                             #print(mutateStartWeight)
                             unassignedItems.pop(j)
                             foundMove = True
@@ -189,9 +186,7 @@ def rearrangeByPairs(child, unassignedItems, weights, binCapacity):
             j += 1
     
     # print("mid method")
-    mutateStartWeight = 0
-    for binIndex in child["bin_weights"]:
-        mutateStartWeight += child["bin_weights"][binIndex]
+
     """print(mutateStartWeight)
     print(unassignedItems)
     print(newUnassignedItems)
@@ -233,9 +228,6 @@ def rearrangeByPairs(child, unassignedItems, weights, binCapacity):
             child["bin_order"].append(label)
 
             numNewBins += 1
-    mutateStartWeight = 0
-    for binIndex in child["bin_weights"]:
-        mutateStartWeight += child["bin_weights"][binIndex]
                         
     return child
 
@@ -459,7 +451,7 @@ def groupingGeneticAlgorithm(binCapacity, weights):
     i = 0
     lowerBound = helpers.getLowerBound(weights, binCapacity)
     
-    while i < 100 and bestBins > lowerBound:
+    while i < 90 and bestBins > lowerBound:
 
         #print(bestFitness)
         i += 1
