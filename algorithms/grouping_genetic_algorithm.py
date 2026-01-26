@@ -255,13 +255,34 @@ def fillGroup(parent1, parent2Groups, unassignedItems1):
         parent1["bin_groups"][groupIndex] = parent2Groups[groupIndex]
         # doesEncodingMakeSense(parent1, groupIndex)
 
+def addBinToChildSol(child, parentOrders, binNum):
+    parent = parentOrders[0]
+    parentBinOrder = parentOrders[1]
+    parentBinLabel = parentBinOrder[binNum]
+
+    skip = False
+    # First check no items in the bin are already in our solution
+    curBin = parent["bin_groups"][parentBinLabel]
+    for item in curBin:
+        if child["encoding"][item] != 0:
+            return
+    
+    for item in curBin:
+        child["encoding"][item] = binNum
+    
+    child["bin_groups"].append(curBin.copy())
+    binWeight = parent["bin_weights"][parentBinLabel]
+    child["bin_weights"].append(binWeight)
+    child["bin_order"].append(binNum)
+
+
 def crossover(parent1, parent2, weights, binCapacity):
     # ordered bins, gene level crossover
     # doesEncodingMakeSense(parent1, -10)
     # doesEncodingMakeSense(parent2, -10)
 
     child = {}
-    child["encoding"] = [0] * len(weights)
+    child["encoding"] = [-1] * len(weights)
     child["bin_groups"] = []
     child["bin_weights"] = []
     child["bin_order"] = []
@@ -277,32 +298,36 @@ def crossover(parent1, parent2, weights, binCapacity):
     for x in range(0, iterations):
         # We need to order the current bins by fullness
         orderedParents = [(parent2, p2BinOrder), (parent1, p1BinOrder)]
+
         # Determine which bin is more full
         if parent1["bin_weights"][p1BinOrder[x]] >= parent2["bin_weights"][p2BinOrder[x]]:
             orderedParents[0] = (parent1, p1BinOrder)
             orderedParents[1] = (parent2, p2BinOrder)
+
         
         for parentOrders in orderedParents:
-            parent = parentOrders[0]
-            parentBinOrder = parentOrders[1]
+            addBinToChildSol(child, parentOrders, x)
+    
+    while p1BinLen > iterations:
+        addBinToChildSol(child, [parent1, p1BinOrder], iterations)
+        iterations += 1
+    
+    while p2BinLen > iterations:
+        addBinToChildSol(child, [parent2, p2BinOrder], iterations)
+        iterations += 1
 
-            # First check no items in the bin are already in our solution
-            curBin = parent["bin_groups"][parentBinOrder[x]]
-            for item in curBin:
-                if child["encoding"][item] != 0:
-                    continue
-            
-            for item in curBin:
-                child["encoding"][item] = x
-            
-            child["bin_groups"].append(curBin.copy())
-            binWeight = parent["bin_weights"][parentBinOrder[x]]
-            child["bin_weights"].append(binWeight)
-            child["bin_order"].append(x)
+    # It is possible some items are not yet assigned, determine these and assign them
+    unassignedItems = []
+    for x in range(0, len(child["encoding"])):
+        if child["encoding"][x] == -1:
+            unassignedItems.append(x)
+    
+    if unassignedItems:
+        rearrangeByPairs(child, unassignedItems, weights, binCapacity)
 
     
 
-    return [parent1, parent2]
+    return child
 
 def mutate(child, weights, binCapacity):
 
