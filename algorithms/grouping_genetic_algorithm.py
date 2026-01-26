@@ -256,60 +256,51 @@ def fillGroup(parent1, parent2Groups, unassignedItems1):
         # doesEncodingMakeSense(parent1, groupIndex)
 
 def crossover(parent1, parent2, weights, binCapacity):
-    # 2 point crossover
+    # ordered bins, gene level crossover
     # doesEncodingMakeSense(parent1, -10)
     # doesEncodingMakeSense(parent2, -10)
 
-    s = random.randint(0, len(parent1["bin_groups"]) - 1)
-    e = random.randint(0, len(parent1["bin_groups"]) - 1)
-    if e < s:
-        tmp = s
-        s = e
-        e = tmp
-    prefE = s + random.randint(0, 4)
-    e = min(e, prefE)
+    child = {}
+    child["encoding"] = [0] * len(weights)
+    child["bin_groups"] = []
+    child["bin_weights"] = []
+    child["bin_order"] = []
 
-    # We want to take the groups from index s to e in parent 1 and swap them with those groups in parent2
-    # Note, doesn't necessarily correspond to groups labelled s, s+1 ... e
-    parent1Groups = {}
-    parent2Groups = {}
-    groupsToCheck = []
+    p1BinOrder = parent1["bin_order"]
+    p2BinOrder = parent2["bin_order"]
 
-    # We also need to unassign every item which are in these groups for each
-    unassignedItems1 = []
-    unassignedItems2 = []
-    i = 0
+    p1BinLen = len(p1BinOrder)
+    p2BinLen = len(p2BinOrder)
 
-    for groupIndex in parent1["bin_groups"]:
-        if i >=s and i <= e:
-            groupsToCheck.append(groupIndex)
-            parent1Groups[groupIndex] = parent1["bin_groups"][groupIndex].copy()
+    iterations = min(p1BinLen, p2BinLen)
 
-            for item in parent1Groups[groupIndex]:
-                unassignedItems1.append(item)
-                parent1["encoding"][item] = -1 # Stands for unassigned
-        i += 1
+    for x in range(0, iterations):
+        # We need to order the current bins by fullness
+        orderedParents = [(parent2, p2BinOrder), (parent1, p1BinOrder)]
+        # Determine which bin is more full
+        if parent1["bin_weights"][p1BinOrder[x]] >= parent2["bin_weights"][p2BinOrder[x]]:
+            orderedParents[0] = (parent1, p1BinOrder)
+            orderedParents[1] = (parent2, p2BinOrder)
+        
+        for parentOrders in orderedParents:
+            parent = parentOrders[0]
+            parentBinOrder = parentOrders[1]
 
-    for groupIndex in groupsToCheck:
-        parent1["bin_groups"].pop(groupIndex)
-        if groupIndex in parent2["bin_groups"]:
-            parent2Groups[groupIndex] = parent2["bin_groups"][groupIndex].copy()
+            # First check no items in the bin are already in our solution
+            curBin = parent["bin_groups"][parentBinOrder[x]]
+            for item in curBin:
+                if child["encoding"][item] != 0:
+                    continue
+            
+            for item in curBin:
+                child["encoding"][item] = x
+            
+            child["bin_groups"].append(curBin.copy())
+            binWeight = parent["bin_weights"][parentBinOrder[x]]
+            child["bin_weights"].append(binWeight)
+            child["bin_order"].append(x)
 
-            for item in parent2Groups[groupIndex]:
-                unassignedItems2.append(item)
-                parent2["encoding"][item] = -1 # Stands for unassigned
-            parent2["bin_groups"].pop(groupIndex)
-
-
-    # Fill in parent 1 with the groups from parent 2, then assign unassigned items
-    fillGroup(parent1, parent2Groups, unassignedItems1)
-
-    firstFitDecreasing(parent1, unassignedItems1, weights, binCapacity)
-
-    # Do the same for parent2
-    fillGroup(parent2, parent1Groups, unassignedItems2)
-    firstFitDecreasing(parent2, unassignedItems2, weights, binCapacity)
-
+    
 
     return [parent1, parent2]
 
@@ -466,15 +457,17 @@ def groupingGeneticAlgorithm(binCapacity, weights):
             # Crossover is expensive so we are going to do it 10% of the time
             prob = random.random()
 
-            
+            children = [0, 0]            
             parentCopy1 = pickle.loads(pickle.dumps(population[parent1Index], -1))
             parentCopy2 = pickle.loads(pickle.dumps(population[parent2Index], -1))
 
-            #if parent1Index != parent2Index and prob > 0.9:
+            if parent1Index != parent2Index and prob > 0.9:
                 # https://stackoverflow.com/questions/24756712/deepcopy-is-extremely-slow
-                #children = crossover(parentCopy1, parentCopy2, child1BinOrder, child2BinOrder, weights, binCapacity)
-            #else:
-            children = [parentCopy1, parentCopy2]
+                children[0] = crossover(parentCopy1, parentCopy2, weights, binCapacity)
+                children[1] = crossover(parentCopy2, parentCopy1, weights, binCapacity)
+
+            else:
+                children = [parentCopy1, parentCopy2]
 
             # Mutation
             child1 = mutate(children[0], weights, binCapacity)
