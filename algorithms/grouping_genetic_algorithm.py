@@ -81,7 +81,6 @@ def getFirstUnusedGroupIndex(child):
         i += 1
 
 def rearrangeByPairs(child, unassignedItems, weights, binCapacity):
-    global totalTimeFitting
     # print("Rearrange start")
 
     # Randomise bin order
@@ -191,10 +190,15 @@ def rearrangeByPairs(child, unassignedItems, weights, binCapacity):
     print(unassignedItems)
     print(newUnassignedItems)
     print("end mid method")"""
-
     for unassignedItem in unassignedItems:
         newUnassignedItems.append(unassignedItem)
     unassignedItems = newUnassignedItems
+
+    for unassignedItem in unassignedItems:
+        if weights[unassignedItem] >= binCapacity/2:
+            unassignedItems.sort(key=lambda itemIndex: weights[itemIndex], reverse=True)
+            break
+
     """print(unassignedItems)
     sumOfUnassigned = 0
     for item in unassignedItems:
@@ -260,20 +264,20 @@ def addBinToChildSol(child, parentOrders, binNum):
     parentBinOrder = parentOrders[1]
     parentBinLabel = parentBinOrder[binNum]
 
-    skip = False
     # First check no items in the bin are already in our solution
     curBin = parent["bin_groups"][parentBinLabel]
     for item in curBin:
-        if child["encoding"][item] != 0:
+        if child["encoding"][item] != -1:
             return
     
     for item in curBin:
         child["encoding"][item] = binNum
     
-    child["bin_groups"].append(curBin.copy())
+    numBinGroups = len(child["bin_groups"])
+    child["bin_groups"][numBinGroups] = curBin.copy()
     binWeight = parent["bin_weights"][parentBinLabel]
-    child["bin_weights"].append(binWeight)
-    child["bin_order"].append(binNum)
+    child["bin_weights"][numBinGroups] = binWeight
+    child["bin_order"].append(numBinGroups)
 
 
 def crossover(parent1, parent2, weights, binCapacity):
@@ -283,8 +287,8 @@ def crossover(parent1, parent2, weights, binCapacity):
 
     child = {}
     child["encoding"] = [-1] * len(weights)
-    child["bin_groups"] = []
-    child["bin_weights"] = []
+    child["bin_groups"] = {}
+    child["bin_weights"] = {}
     child["bin_order"] = []
 
     p1BinOrder = parent1["bin_order"]
@@ -303,7 +307,6 @@ def crossover(parent1, parent2, weights, binCapacity):
         if parent1["bin_weights"][p1BinOrder[x]] >= parent2["bin_weights"][p2BinOrder[x]]:
             orderedParents[0] = (parent1, p1BinOrder)
             orderedParents[1] = (parent2, p2BinOrder)
-
         
         for parentOrders in orderedParents:
             addBinToChildSol(child, parentOrders, x)
@@ -325,22 +328,12 @@ def crossover(parent1, parent2, weights, binCapacity):
     if unassignedItems:
         rearrangeByPairs(child, unassignedItems, weights, binCapacity)
 
-    
-
     return child
 
 def mutate(child, weights, binCapacity):
 
     unassignedItems = []
 
-    mutateStartWeight = 0
-    for binIndex in child["bin_weights"]:
-        mutateStartWeight += child["bin_weights"][binIndex]
-
-    """for groupIndex in child["bin_groups"]:
-        for j in child["bin_groups"][groupIndex]:
-            mutateStartWeight += weights[j]"""
-    
     childBinOrder = child["bin_order"]
     #print(childBinOrder)
 
@@ -349,7 +342,7 @@ def mutate(child, weights, binCapacity):
     # Always delete the emptiest bin
     binsToDelete = [emptiestBin] 
 
-    numBinsToDelete = min(2, len(childBinOrder))
+    numBinsToDelete = min(3, len(childBinOrder))
 
     for _ in range(1, numBinsToDelete):
         indexOfBinToDelete = random.randint(0, len(childBinOrder) - 1)
@@ -357,14 +350,12 @@ def mutate(child, weights, binCapacity):
         binsToDelete.append(binToDelete)
     
     unassignedItems = []
-    descending = False
+
     # Remove the bins, we then run FFD to put the items back into groups
     for binToDelete in binsToDelete:
         curRemovedItems = child["bin_groups"].pop(binToDelete)
         child["bin_weights"].pop(binToDelete)
         for removedItem in curRemovedItems:
-            if weights[removedItem] >= binCapacity/2:
-                descending = True
             unassignedItems.append(removedItem) 
     #print(unassignedItems)
     """    
@@ -373,11 +364,6 @@ def mutate(child, weights, binCapacity):
             unassignedItems = child["bin_groups"].pop(groupIndex)
             break
         i += 1"""
-    
-    if descending:
-        unassignedItems.sort(key=lambda itemIndex: weights[itemIndex], reverse=True)
-    else:
-        random.shuffle(unassignedItems)
 
     """print("START weight " + str(mutateStartWeight))
     preRearrangeWeight = 0
@@ -385,19 +371,6 @@ def mutate(child, weights, binCapacity):
         preRearrangeWeight += child["bin_weights"][binIndex]
     print("pre weight " + str(preRearrangeWeight))"""
     rearrangeByPairs(child, unassignedItems, weights, binCapacity)
-
-    mutateEndWeight = 0
-    for binIndex in child["bin_weights"]:
-        mutateEndWeight += child["bin_weights"][binIndex]
-
-    """for groupIndex in child["bin_groups"]:
-        for j in child["bin_groups"][groupIndex]:
-            mutateEndWeight += weights[j]"""
-
-    if mutateStartWeight != mutateEndWeight:
-        print("ERROR: weight changed during mutation")
-        print("START weight " + str(mutateStartWeight))
-        print("END weight " + str(mutateEndWeight))
 
     return child
 
@@ -430,7 +403,6 @@ def groupingGeneticAlgorithm(binCapacity, weights):
     populationSize = 20
     elitistSize = 2
     population = []
-    groupOrderings = []
 
     weights.sort(reverse=True)
 
@@ -467,7 +439,7 @@ def groupingGeneticAlgorithm(binCapacity, weights):
     i = 0
     lowerBound = helpers.getLowerBound(weights, binCapacity)
     
-    while i < 90 and bestBins > lowerBound:
+    while i < 50 and bestBins > lowerBound:
 
         #print(bestFitness)
         i += 1
@@ -483,16 +455,13 @@ def groupingGeneticAlgorithm(binCapacity, weights):
             prob = random.random()
 
             children = [0, 0]            
-            parentCopy1 = pickle.loads(pickle.dumps(population[parent1Index], -1))
-            parentCopy2 = pickle.loads(pickle.dumps(population[parent2Index], -1))
 
-            if parent1Index != parent2Index and prob > 0.9:
-                # https://stackoverflow.com/questions/24756712/deepcopy-is-extremely-slow
-                children[0] = crossover(parentCopy1, parentCopy2, weights, binCapacity)
-                children[1] = crossover(parentCopy2, parentCopy1, weights, binCapacity)
+            if parent1Index != parent2Index and prob > 0.5:
+                children[0] = crossover(population[parent1Index], population[parent2Index], weights, binCapacity)
+                children[1] = crossover(population[parent2Index], population[parent1Index], weights, binCapacity)
 
             else:
-                children = [parentCopy1, parentCopy2]
+                children = [population[parent1Index], population[parent2Index]]
 
             # Mutation
             child1 = mutate(children[0], weights, binCapacity)
