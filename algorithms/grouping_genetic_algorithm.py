@@ -380,7 +380,7 @@ def scoreFitnesses(population, fitness):
     best = 0
     bestFitness = float("-inf")
     for x in range(0, len(population)):
-        fitness[x] = 0
+        fitness.append(0)
         # Iterate through groups
         groups = population[x]["bin_groups"]
         binWeights = population[x]["bin_weights"]
@@ -401,7 +401,7 @@ def scoreFitnesses(population, fitness):
 def groupingGeneticAlgorithm(binCapacity, weights):
 
     populationSize = 20
-    elitistSize = 2
+    elitistSize = 6
     population = []
 
     weights.sort(reverse=True)
@@ -429,23 +429,28 @@ def groupingGeneticAlgorithm(binCapacity, weights):
 
     # We use the same fitness function as in our simulated annealing implementation
     # The sum of the squares of each bin's weight
-    fitness = {}
+    fitness = []
     best = scoreFitnesses(population, fitness)
-    print(fitness)
     bestFitness = fitness[best]
-    print(fitness[best])
+    #print(population)
+    populationAndFitness = sorted(zip(population, fitness), key=lambda popFit: popFit[1], reverse=True)
+    population = [x for x, _ in populationAndFitness]
+    fitness = [x for _, x in populationAndFitness]
+    best = 0
     bestBins = len(population[best]["bin_groups"])
-
+    bestFitness = fitness[best]
     i = 0
     lowerBound = helpers.getLowerBound(weights, binCapacity)
     
     while i < 50 and bestBins > lowerBound:
 
-        #print(bestFitness)
         i += 1
 
         newPopulation = []
-        newPopulation.append(population[best]) # Save the best packing we've found so far
+        # Save the best packings we've found so far
+        for x in range(0, elitistSize):
+            newPopulation.append(population[x]) 
+            
         while len(newPopulation) < populationSize:
             # Select 2 from our population by tournament selection
             parent1Index = tournamentSelect(population, fitness)
@@ -475,13 +480,20 @@ def groupingGeneticAlgorithm(binCapacity, weights):
 
         population = newPopulation
         
-        fitness = {}
+        #
+        fitness = []
         best = scoreFitnesses(population, fitness)
         if bestFitness != fitness[best]:
             print("progress")
-        #print(fitness)
         bestFitness = fitness[best]
-        #print(fitness[best])
+        #print(population)
+        populationAndFitness = sorted(zip(population, fitness), key=lambda popFit: popFit[1], reverse=True)
+        population = [x for x, _ in populationAndFitness]
+        fitness = [x for _, x in populationAndFitness]
+        best = 0
+        bestBins = len(population[best]["bin_groups"])
+        bestFitness = fitness[best]
+        #
   
     # Convert from encoding back to normal
     bins = {}
