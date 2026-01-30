@@ -52,7 +52,6 @@ def tabuSearch(binCapacity, weights, candidateSolution, fastSearch):
    swapping = 0
    num2s = 0
    num1s = 0
-   # passcheck = 0
 
    tabuList = []
    tabuMaxLen = 8
@@ -64,7 +63,7 @@ def tabuSearch(binCapacity, weights, candidateSolution, fastSearch):
    lowerBound = helpers.getLowerBound(weights, binCapacity)
    totalIterations = 10000
    if fastSearch:
-      totalIterations = 1000
+      totalIterations = 600
    iteration = 0
    while len(candidateSolution["bin_weights"]) > lowerBound and iteration < totalIterations:
       iteration += 1
@@ -92,18 +91,20 @@ def tabuSearch(binCapacity, weights, candidateSolution, fastSearch):
             # If possible, swap a pair of items in bin i and j
             iValToSwap = random.choice(candidateSolution["packing"][i])
             jValToSwap = random.choice(candidateSolution["packing"][j])
+            iWeight = weights[iValToSwap]
+            jWeight = weights[jValToSwap]
 
             jBinWeight = candidateSolution["bin_weights"][j]
-            newJBinWeight = jBinWeight - jValToSwap + iValToSwap
+            newJBinWeight = jBinWeight - jWeight + iWeight
             iBinWeight = candidateSolution["bin_weights"][i]
-            newIBinWeight = iBinWeight - iValToSwap + jValToSwap
+            newIBinWeight = iBinWeight - iWeight + jWeight
 
             if newJBinWeight <= binCapacity and newIBinWeight <= binCapacity:
                new = newJBinWeight*newJBinWeight + newIBinWeight*newIBinWeight
                old = jBinWeight*jBinWeight + iBinWeight*iBinWeight
                scoreChange = new - old
 
-               # If the score isn't better than what we've seen we  aren't picking it
+               # If the score isn't better than what we've seen we aren't picking it
                if bestScoreSoFar == 0 or scoreChange > bestScoreSoFar:
                   # If not taboo select it
                   newjBin = candidateSolution["packing"][j].copy()
@@ -134,14 +135,14 @@ def tabuSearch(binCapacity, weights, candidateSolution, fastSearch):
                   j = tmp
 
             valToMove = random.choice(candidateSolution["packing"][i])
+            valWeight = weights[valToMove]
 
             iBinWeight = candidateSolution["bin_weights"][i]
-            newIBinWeight = iBinWeight - valToMove
+            newIBinWeight = iBinWeight - valWeight
             jBinWeight = candidateSolution["bin_weights"][j]
-            newJBinWeight = jBinWeight + valToMove
+            newJBinWeight = jBinWeight + valWeight
 
             if newJBinWeight <= binCapacity:
-               # passcheck += 1
                new = newJBinWeight*newJBinWeight + newIBinWeight*newIBinWeight
                old = jBinWeight*jBinWeight + iBinWeight*iBinWeight
                scoreChange = new - old
@@ -181,14 +182,14 @@ def tabuSearch(binCapacity, weights, candidateSolution, fastSearch):
          tabuPos = addToTabuList(candidateSolution, i, j, tabuList, tabuPos, tabuMaxLen)
 
          candidateSolution["packing"][i].remove(iValToSwap)
-         candidateSolution["bin_weights"][i] -= iValToSwap
+         candidateSolution["bin_weights"][i] -= weights[iValToSwap]
          candidateSolution["packing"][i].append(jValToSwap)
-         candidateSolution["bin_weights"][i] += jValToSwap
+         candidateSolution["bin_weights"][i] += weights[jValToSwap]
 
          candidateSolution["packing"][j].remove(jValToSwap)
-         candidateSolution["bin_weights"][j] -= jValToSwap
+         candidateSolution["bin_weights"][j] -= weights[jValToSwap]
          candidateSolution["packing"][j].append(iValToSwap)
-         candidateSolution["bin_weights"][j] += iValToSwap
+         candidateSolution["bin_weights"][j] += weights[iValToSwap]
 
       elif selectedIandVal[1] >= 0:
          movement += 1
@@ -199,34 +200,20 @@ def tabuSearch(binCapacity, weights, candidateSolution, fastSearch):
          tabuPos = addToTabuList(candidateSolution, i, j, tabuList, tabuPos, tabuMaxLen)
 
          candidateSolution["packing"][i].remove(valToMove)
-         candidateSolution["bin_weights"][i] -= valToMove
+         candidateSolution["bin_weights"][i] -= weights[valToMove]
          candidateSolution["packing"][j].append(valToMove)
-         candidateSolution["bin_weights"][j] += valToMove
+         candidateSolution["bin_weights"][j] += weights[valToMove]
 
          if candidateSolution["bin_weights"][i] == 0:
-            #print("We removed a whole bin!!!")
             candidateSolution["bin_weights"].pop(i)
             candidateSolution["packing"].pop(i)
-   
-   """print("Other initial")
-   print(swapping)
-   print(movement)
-   print(num1s)
-   print(num2s)
-   print(passcheck)
-   print(len(bestSolution["bin_weights"]))
-   print(len(tabuList))
-   print("end")"""
-
-   if len(bestSolution["packing"]) == lowerBound:
-      print("WOOOOOW")
 
    return determineBest(bestSolution, candidateSolution)
 
 def tabuSearchFFD(binCapacity, weights):
-    candidateSolution = helpers.firstFit(binCapacity, weights, True, False)
+    candidateSolution = helpers.firstFit(binCapacity, weights, True)
     return tabuSearch(binCapacity, weights, candidateSolution, False)
 
-def tabuSearchFF(binCapacity, weights):
-    candidateSolution = helpers.firstFit(binCapacity, weights, False, False)
-    return tabuSearch(binCapacity, weights, candidateSolution, False)
+#def tabuSearchFF(binCapacity, weights):
+#    candidateSolution = helpers.firstFit(binCapacity, weights, False)
+#    return tabuSearch(binCapacity, weights, candidateSolution, False)

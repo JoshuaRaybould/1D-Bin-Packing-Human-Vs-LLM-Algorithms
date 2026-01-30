@@ -2,12 +2,6 @@ import pickle
 import random
 from . import helpers
 
-"""def findContainingBin(itemIndex, candidateSolution):
-    return candidateSolution["containing_bin"][itemIndex]
-    for b in range(0, len(candidateSolution["packing"])):
-            if itemIndex in candidateSolution["packing"][b]:
-                return b"""
-
 def calcFitness(solution):
     fitness = 0
     for binWeight in solution["bin_weights"]:
@@ -60,6 +54,7 @@ def bestImprovement(solution, weights, binCapacity):
                     item1Weight, item2Weight = weights[item1[0]], weights[item2[0]]
                     item1Bin, item2Bin = item1[1], item2[1]
 
+                    # If swapping is feasible
                     if solution["bin_weights"][item2Bin] + item1Weight <= binCapacity and solution["bin_weights"][item1Bin] + item2Weight <= binCapacity:
                         bin1Score, bin2Score = solution["bin_weights"][item1Bin], solution["bin_weights"][item2Bin]
                         originalBinsScore = (bin1Score * bin1Score) + (bin2Score * bin2Score)
@@ -91,7 +86,6 @@ def bestImprovement(solution, weights, binCapacity):
                 solution["packing"].pop(binToTransferFrom)
                 solution["bin_weights"].pop(binToTransferFrom)
                 bins.remove(binToTransferFrom) 
-                # print("REMOVED BIN")
                 # We need to update all of our bin indexes now
                 for containingBin in solution["containing_bin"]:
                     if solution["containing_bin"][containingBin] > binToTransferFrom:

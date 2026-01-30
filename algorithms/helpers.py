@@ -2,7 +2,7 @@ import random
 import math
 
 # if index is true we put the index of the item in the packing rather than its weight
-def firstFit(binCapacity, weights, decreasing, index):
+def firstFit(binCapacity, weights, decreasing):
     bins = {}
     bins["packing"], bins["bin_weights"] = [], []
 
@@ -14,9 +14,7 @@ def firstFit(binCapacity, weights, decreasing, index):
     for x in range(0, len(weights)):
         weight = weights[x]
 
-        valueToPutInPacking = weight
-        if index:
-            valueToPutInPacking = x
+        valueToPutInPacking = x
         packed = False
 
         for b in range(0, len(bins["bin_weights"])):

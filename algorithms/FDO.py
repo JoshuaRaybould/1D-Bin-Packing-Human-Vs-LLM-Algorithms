@@ -37,7 +37,6 @@ def applyPace(currentSolution, weights, binCapacity, fitness, solIndex, pace):
     while curBin < len(currentSolution["packing"]):
         # If bin empty remove it
         if not currentSolution["packing"][curBin]:
-            #print("REmoval")
             currentSolution["packing"].pop(curBin)
             currentSolution["bin_weights"].pop(curBin)
             for containingBin in currentSolution["containing_bin"]:
@@ -78,18 +77,13 @@ def adaptiveFDO(binCapacity, weights):
     minFitness = fitness[minFitnessIndex]
     
     bestSolution = pickle.loads(pickle.dumps(population[maxFitnessIndex], -1)) 
-    # print("START")
-    # print(len(bestSolution["packing"]))
     bestSolByLen = bestSolution
     bestLen = len(bestSolByLen["packing"])
-    #print("-----------------------------")
-    #print("Start len " + str(bestLen))
-    #print("-----------------------------")
     newBestSolution = []
     iteration = 0
     maxIterations = 150
     while iteration < maxIterations and len(bestSolution["packing"]) != lowerBound:
-        #print(len(bestSolByLen["packing"]))
+ 
         # Set worst solution to global best
         population[minFitnessIndex] = pickle.loads(pickle.dumps(bestSolution, -1))
         fitness[minFitnessIndex] = maxFitness
@@ -152,11 +146,8 @@ def adaptiveFDO(binCapacity, weights):
                 applyPace(currentSolution, weights, binCapacity, fitness, x, pace)
 
             if len(currentSolution["packing"]) < bestLen:
-                #print("IMprovw")
-                #print(len(bestSolByLen["packing"]))
                 bestSolByLen = pickle.loads(pickle.dumps(currentSolution, -1)) 
                 bestLen = len(bestSolByLen["packing"])
-                #print(len(bestSolByLen["packing"]))
             if fitness[x] > maxFitness:
                 maxFitness = fitness[x]
                 newBestSolution = currentSolution

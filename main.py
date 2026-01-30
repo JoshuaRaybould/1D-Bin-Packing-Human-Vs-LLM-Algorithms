@@ -1,11 +1,12 @@
 from utilities import load_data
 from utilities import test_correctness
+import argparse
 from enum import Enum
 import time
-from algorithms import randomised_best_fit, simulated_annealing, grouping_genetic_algorithm, tabu_search, ant_colony_optimisation, GRASP, variable_neighbourhood_search, AFDO
+from algorithms import randomised_best_fit, simulated_annealing, grouping_genetic_algorithm, tabu_search, ant_colony_optimisation, GRASP, variable_neighbourhood_search, FDO
 
-algorithmOptions = [randomised_best_fit.randomisedBestFit, simulated_annealing.simulatedAnnealingFF, simulated_annealing.simulatedAnnealingFFD, tabu_search.tabuSearchFF, tabu_search.tabuSearchFFD, grouping_genetic_algorithm.groupingGeneticAlgorithm, ant_colony_optimisation.antColonyOptimisation, GRASP.reactiveGRASP, variable_neighbourhood_search.variableNeighbourhoodSearchFFD, AFDO.adaptiveFDO]
-chosenAlgorithm = algorithmOptions[-1]
+algorithmOptions = [randomised_best_fit.randomisedBestFit, simulated_annealing.simulatedAnnealingFFD, tabu_search.tabuSearchFFD, grouping_genetic_algorithm.groupingGeneticAlgorithm, ant_colony_optimisation.antColonyOptimisation, GRASP.reactiveGRASP, variable_neighbourhood_search.variableNeighbourhoodSearchFFD, FDO.adaptiveFDO]
+chosenAlgorithm = algorithmOptions[7]
 
 class Mode(Enum):
    DEFAULT = 0
@@ -13,7 +14,7 @@ class Mode(Enum):
    CHOOSE = 2
    SMALL = 3
 
-modeOfOperation = Mode.DEFAULT
+modeOfOperation = Mode.SMALL
 done = False
 while not done:
    done = True
@@ -64,7 +65,28 @@ def applyAlgorithm(instances, chosenAlgorithm, printSols):
 
       totalWeight = sum(packing["bin_weights"])
       if totalWeight - sum(instance["weights"]) != 0:
+         raise Exception("Error: weight of instance differs to sum of bin weights")
+      
+      totalWeight = 0
+      for x in range(0, len(instance["weights"])):
+         success = False
+         for binPack in packing["packing"]:
+            if x in binPack:
+               success = True
+               totalWeight += instance["weights"][x]
+         if not success:
+            print("We are missing items")
+      
+      if totalWeight - sum(instance["weights"]) != 0:
          raise Exception("Error: weight of instance differs to that of packing")
+      
+      for binPack in packing["packing"]:
+         binWeight = 0
+         for index in binPack:
+            binWeight += instance["weights"][index]
+         if binWeight > instance["bin_capacity"]:
+            print(binPack)
+            print("bin weight exceeded")
 
       totalTime += (endTime - startTime)
 

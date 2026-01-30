@@ -5,15 +5,6 @@ import pickle
 
 totalTimeFitting = 0
 
-"""def doesEncodingMakeSense(encoding, groupIndex):
-    for x in range(0, len(encoding["encoding"])):
-        itemGroup = encoding["encoding"][x]
-        if itemGroup != -1 and x not in encoding["bin_groups"][itemGroup]:
-            print("TROUBLE")
-            print(groupIndex)
-            print(encoding)
-            break"""
-
 def preAllocateItems(binCapacity, weights, binGroups, binWeights, encoding):
     binGroups[0] = [0]
     binWeights[0] = weights[0]
@@ -425,8 +416,7 @@ def groupingGeneticAlgorithm(binCapacity, weights):
         #
         fitness = []
         best = scoreFitnesses(population, fitness)
-        """if bestFitness != fitness[best]:
-            print("progress")"""
+
         #print(population)
         populationAndFitness = sorted(zip(population, fitness), key=lambda popFit: popFit[1], reverse=True)
         population = [x for x, _ in populationAndFitness]
@@ -444,7 +434,7 @@ def groupingGeneticAlgorithm(binCapacity, weights):
         bins["packing"].append([])
         bins["bin_weights"].append(0)
         for i in bestSolGroups[groupIndex]:
-            bins["packing"][-1].append(weights[i])
+            bins["packing"][-1].append(i)
             bins["bin_weights"][-1] += weights[i]
  
     return bins
