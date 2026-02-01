@@ -126,7 +126,7 @@ def getTestInstances():
 
 # Get uniform instances we generated
 def getOurUniformInstances(n):
-    instancesDir = Path("./my_instances/our_u-" + n)
+    instancesDir = Path("./my_instances/our_u_" + n)
     return loadNoSolInstances(instancesDir)
 
 # Below are functions for generating a specific number instances with bins set to some capacity and number of items

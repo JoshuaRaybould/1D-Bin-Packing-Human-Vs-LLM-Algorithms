@@ -101,8 +101,8 @@ def load_instances(args):
    if set_name == "test-u":
       return load_data.getTestInstances()
    
-   if set_name.startswith("our-uniform-"):
-      n = set_name.split("-", 1)[1]
+   if set_name.startswith("our-u-"):
+      n = set_name[len("our-u-"):]
       return load_data.getOurUniformInstances(n)
    
    raise ValueError(f"Unknown set: {set_name}")
