@@ -331,8 +331,6 @@ def groupingGeneticAlgorithm(binCapacity, weights):
     elitistSize = 5
     population = []
 
-    weights.sort(reverse=True)
-
     binGroups = {}
     binWeights = {}
     # The value stored at the index corresponds to the bin the item is in
