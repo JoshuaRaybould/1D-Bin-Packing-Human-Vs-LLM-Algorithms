@@ -61,7 +61,7 @@ def calcFitness(population, fitness):
     return (maxFitnessIndex, minFitnessIndex)
 
 def adaptiveFDO(binCapacity, weights):
-    populationSize = 12
+    populationSize = 10
     population = []
 
     lowerBound = helpers.getLowerBound(weights, binCapacity)

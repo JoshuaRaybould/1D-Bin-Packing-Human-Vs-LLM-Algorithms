@@ -199,9 +199,9 @@ def variableNeighbourhoodSearch(binCapacity, weights, candidateSolution):
     incumbentSolution = candidateSolution
     incumbentFitness = calcFitness(incumbentSolution)
 
-    kMax = 10
+    kMax = 6
     iteration = 0
-    totalIterations = 10
+    totalIterations = 15
 
     lowerBound = helpers.getLowerBound(weights, binCapacity)
 

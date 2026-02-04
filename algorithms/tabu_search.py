@@ -60,15 +60,15 @@ def tabuSearch(binCapacity, weights, candidateSolution, fastSearch):
 
    # We can use the lower bound as a way to check if we have arrived at the ideal solution (though it may not be achievable)
    lowerBound = helpers.getLowerBound(weights, binCapacity)
-   totalIterations = 10000
+   totalIterations = 21500
    if fastSearch:
-      totalIterations = 600
+      totalIterations = 1500
    iteration = 0
    while len(candidateSolution["bin_weights"]) > lowerBound and iteration < totalIterations:
       iteration += 1
 
       # We select the best of these neighbours provided none are in the tabu list
-      numNeighbours = 40
+      numNeighbours = 30
       bestScoreSoFar = 0
       emptiestBin = getEmptiestBin(candidateSolution)
       for _ in range(0, numNeighbours):
