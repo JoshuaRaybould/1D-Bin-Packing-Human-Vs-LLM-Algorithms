@@ -1,6 +1,10 @@
 from utilities import load_data
 from utilities import test_correctness
 import argparse
+import csv
+from pathlib import Path
+import hashlib
+import random
 import time
 from algorithms import randomised_best_fit, simulated_annealing, grouping_genetic_algorithm, tabu_search, ant_colony_optimisation, GRASP, variable_neighbourhood_search, FDO
 
@@ -52,7 +56,7 @@ def build_parser():
    parser.add_argument(
       "--mode",
       default="default",
-      choices=["default", "test", "choose", "small", "generate"],
+      choices=["default", "test", "choose", "generate"],
       help="How to run the selected algorithm."
    )
 
@@ -66,6 +70,13 @@ def build_parser():
    parser.add_argument("--count", type=int, default=20, help="For set=/our-uniform: number of instances.")
    parser.add_argument("--cap", type=int, default=100, help="For set=/our-uniform: bin capacity.")
    parser.add_argument("--items", type=int, default=100, help="For set=/our-uniform: number of items.")
+
+   parser.add_argument(
+   "--csv",
+   default=None,
+   help="Optional path to append one summary row (per dataset run) as CSV."
+   )
+
 
    return parser
 
@@ -107,68 +118,118 @@ def load_instances(args):
    
    raise ValueError(f"Unknown set: {set_name}")
 
+def validatePacking(instance, packing):
+   totalWeight = sum(packing["bin_weights"])
+   if totalWeight - sum(instance["weights"]) != 0:
+      raise Exception("Error: weight of instance differs to sum of bin weights")
+   
+   seen = set()
+   for bin_pack in packing["packing"]:
+         for idx in bin_pack:
+            if idx in seen:
+                  raise Exception("Item packed twice")
+            seen.add(idx)
+   if len(seen) != len(instance["weights"]):
+         raise Exception("Missing items in packing")
+   
+   for binPack in packing["packing"]:
+      binWeight = 0
+      for index in binPack:
+         binWeight += instance["weights"][index]
+      if binWeight > instance["bin_capacity"]:
+         print(binWeight)
+         for index in binPack:
+            print(instance["weights"][index])
+         print(instance["bin_capacity"])
+         raise Exception("bin capacity exceeded")
 
-def applyAlgorithm(instances, chosenAlgorithm):
+def applyAlgorithm(instances, chosenAlgorithm, runs):
    ratioScore = 0
    totalBins = 0
    totalOpt = 0
    totalTime = 0
+   optimalHits = 0
 
    for instance in instances:
+      bestBins = float("inf")
+      optBins = instance["optimal_solution"]
+      instanceId = instance["file_name"]
+
       # Decision to use time.perf_counter() was due to https://builtin.com/articles/timing-functions-python
       # time.time() is apparently not as precise and timeit is generally for small bits of code
-      startTime = time.perf_counter()
-      packing = chosenAlgorithm(instance["bin_capacity"], instance["weights"].copy())
-      endTime = time.perf_counter()
+      for x in range(0, runs):
+         
+         # Derive a unique, repeatable seed from (instanceId, runIndex) to make each trial reproducible and not affected by other runs.
+         seedBytes = hashlib.sha256(f"{instanceId}|{x}".encode()).digest()
+         curSeed = int.from_bytes(seedBytes[:8], "big")
+         random.seed(curSeed)
 
-      totalWeight = sum(packing["bin_weights"])
-      if totalWeight - sum(instance["weights"]) != 0:
-         raise Exception("Error: weight of instance differs to sum of bin weights")
-      
-      seen = set()
-      for bin_pack in packing["packing"]:
-            for idx in bin_pack:
-               if idx in seen:
-                   raise Exception("Item packed twice")
-               seen.add(idx)
-      if len(seen) != len(instance["weights"]):
-            raise Exception("Missing items in packing")
-      
-      for binPack in packing["packing"]:
-         binWeight = 0
-         for index in binPack:
-            binWeight += instance["weights"][index]
-         if binWeight > instance["bin_capacity"]:
-            print(binWeight)
-            for index in binPack:
-               print(instance["weights"][index])
-            print(instance["bin_capacity"])
-            raise Exception("bin capacity exceeded")
+         startTime = time.perf_counter()
+         packing = chosenAlgorithm(instance["bin_capacity"], instance["weights"].copy())
+         endTime = time.perf_counter()
+         totalTime += (endTime - startTime)
+         
+         validatePacking(instance, packing)
 
-      totalTime += (endTime - startTime)
+         algBins = len(packing["bin_weights"])
 
-      opt = instance["optimal_solution"]
-      alg = len(packing["bin_weights"])
-      totalBins += alg
-      if alg < opt:
-         print(instance["bin_capacity"])
-         print(packing["bin_weights"])
-         print(packing["packing"])
-         print(instance["optimal_solution"])
-         raise Exception("Error: negative waste, our algorithm is cheating")
-      totalOpt += opt
+         if algBins < bestBins:
+            bestBins = algBins
 
-      ratioScore += (alg/opt)
+         totalBins += algBins
+
+         if algBins < optBins:
+            """ print(instance["bin_capacity"])
+            print(packing["bin_weights"])
+            print(packing["packing"])
+            print(instance["optimal_solution"])"""
+            raise Exception("Error: algorithm used fewer bins that the optimal")
+         
+         totalOpt += optBins
+         ratioScore += (algBins/optBins)
+
+      if optBins == bestBins:
+         optimalHits += 1
 
    waste = totalBins - totalOpt
+   overall_ratio = (waste + totalOpt) / totalOpt
+   avg_ratio = ratioScore / (len(instances) * runs)
+
    print("Time: " + str(totalTime))
    print("Bins used: " + str(totalBins))
    print("Optimal number of bins: " + str(totalOpt))
    print("Waste (Excess bins): " + str(waste))
-   print("Ratio of bins used by algorithm to bins used in optimal: " +  str((waste + totalOpt)/totalOpt))
+   print("Ratio of bins used by algorithm to bins used in optimal: " +  str(overall_ratio))
    print("Number of instances used: " + str(len(instances)))
-   print("Average ratio of bins used by algorithm to bins used in optimal case: " + str(ratioScore/len(instances)))
+   print("optimal was reached for " + str(optimalHits) + " of the instances")
+   print("Average ratio of bins used by algorithm to bins used in optimal case: " + str(avg_ratio))
 
+   return {
+      "time_sec": totalTime,
+      "bins_used": totalBins,
+      "optimal_bins": totalOpt,
+      "waste_bins": waste,
+      "overall_ratio": overall_ratio,
+      "num_instances": len(instances),
+      "avg_ratio": avg_ratio,
+   }
+
+
+def append_summary_to_csv(filename: str, row: dict, results_dir: str = "Results"):
+    # Create Results/ if it doesn't exist
+    results_path = Path(results_dir)
+    results_path.mkdir(parents=True, exist_ok=True)
+
+    # Build full path: Results/<filename>
+    csv_path = results_path / filename
+
+    file_exists = csv_path.exists()
+
+    with csv_path.open("a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(row.keys()))
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(row)
 
 
 def main(): 
@@ -187,7 +248,7 @@ def main():
       )
 
       # Put num items into the filename prefix
-      prefix = f"{"our_u"}_{args.items}"
+      prefix = f"our_u_{args.items}"
 
       out_dir = load_data.saveInstancesAsTxt(instances, prefix)
 
@@ -209,11 +270,19 @@ def main():
          chosenInstances.append(instance)
          if len(chosenInstances) == numInstances:
             break
-      applyAlgorithm(chosenInstances, chosenAlgorithm)
+
+      summary = applyAlgorithm(chosenInstances, chosenAlgorithm, args.runs)
+
+      if args.csv:
+         row = {"dataset": args.set, "algo": args.algo, "runs": args.runs, **summary}
+         append_summary_to_csv(args.csv, row)
       return
 
    # default
-   applyAlgorithm(instances, chosenAlgorithm)
+   summary = applyAlgorithm(instances, chosenAlgorithm, args.runs)
+   if args.csv:
+      row = {"dataset": args.set, "algo": args.algo, "runs": args.runs, **summary}
+      append_summary_to_csv(args.csv, row)
 
 if __name__ == "__main__":
    main()
