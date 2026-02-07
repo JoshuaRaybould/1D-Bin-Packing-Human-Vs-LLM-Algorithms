@@ -26,7 +26,6 @@ def pickWeightIndex(curAntSol, indexes, pheromoneScores, pheromoneImportance, he
       curAntSol.append([])
    
    probabilities = []
-   pheromoneParts = []
    total = 0
 
    for x in range(len(indexes)-1, -1, -1):
@@ -46,7 +45,6 @@ def pickWeightIndex(curAntSol, indexes, pheromoneScores, pheromoneImportance, he
       heuristicScore = math.pow(curWeight, heuristicImportance)
 
       # These need to be scaled using the total later
-      pheromoneParts.append(pheromonePart)
       probability = pheromonePart * heuristicScore
       probabilities.append(probability)
       total +=  probability
@@ -71,10 +69,10 @@ def updatePheromones(solution, fitness, pheromoneScores, weights):
                pheromoneScores[(weights[bin[x]], weights[bin[y]])] += fitness
 
 def antColonyOptimisation(binCapacity, weights):
-   populationSize = math.ceil(5) # Number of "ant trails"
-   evaporationParameter = 0.95
+   populationSize = 4 # Number of "ant trails"
+   evaporationParameter = 0.2
    heuristicImportance = 10
-   pheromoneImportance = 1
+   pheromoneImportance = 2
    numItems = len(weights)
    
    iterationsBetweenGlobalReinforcement = math.ceil(500/numItems)
@@ -107,7 +105,7 @@ def antColonyOptimisation(binCapacity, weights):
    lowerBound = helpers.getLowerBound(weights, binCapacity)
 
    # Have each ant build a solution
-   for y in range (0, 15):
+   for y in range (0, 5):
       if bestSolutionSoFar and len(bestSolutionSoFar) == lowerBound:
          bins = convertToBins(bestSolutionSoFar)
          return bins

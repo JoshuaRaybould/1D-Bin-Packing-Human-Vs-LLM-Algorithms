@@ -327,8 +327,17 @@ def scoreFitnesses(population, fitness):
 
 def groupingGeneticAlgorithm(binCapacity, weights):
 
-    populationSize = 19
-    elitistSize = 5
+    populationSize = 16
+    elitistSize = 4
+    numberToCreate = 8
+    # The elites are half of the parents, first the fathers then mothers
+    # So the number of children being generated from parents shouldn't exceed twice the number of elites
+    actualNumToCreate = min(numberToCreate, min(elitistSize * 2, populationSize-elitistSize))
+    generation = 0
+    maxGeneration = 70
+    crossoverProbability = 0.4
+
+    crossoverMinPercent = 1 - crossoverProbability
     population = []
 
     binGroups = {}
@@ -362,12 +371,11 @@ def groupingGeneticAlgorithm(binCapacity, weights):
     best = 0
     bestBins = len(population[best]["bin_groups"])
 
-    i = 0
     lowerBound = helpers.getLowerBound(weights, binCapacity)
     
-    while i < 45 and bestBins > lowerBound:
+    while generation < maxGeneration and bestBins > lowerBound:
 
-        i += 1
+        generation += 1
         parentIndexes = buildParentSets(population, elitistSize)
         curParentsIndex = 0
 
@@ -376,7 +384,7 @@ def groupingGeneticAlgorithm(binCapacity, weights):
         for x in range(0, elitistSize):
             newPopulation.append(population[x]) 
             
-        while len(newPopulation) < elitistSize * 3:
+        while len(newPopulation) < elitistSize + actualNumToCreate:
             goodParentIndex = parentIndexes["good"][curParentsIndex]
             randomParentIndex = parentIndexes["random"][curParentsIndex]
             curParentsIndex += 1
@@ -387,7 +395,7 @@ def groupingGeneticAlgorithm(binCapacity, weights):
 
             children = [0, 0]            
 
-            if prob > 0.5:
+            if prob > crossoverMinPercent:
                 children[0] = crossover(population[goodParentIndex], population[randomParentIndex], weights, binCapacity)
                 children[1] = crossover(population[randomParentIndex], population[goodParentIndex], weights, binCapacity)
             else:
@@ -397,7 +405,7 @@ def groupingGeneticAlgorithm(binCapacity, weights):
             child1 = mutate(children[0], weights, binCapacity)
             newPopulation.append(child1)
 
-            if len(newPopulation) >= populationSize:
+            if len(newPopulation) >= elitistSize + actualNumToCreate:
                 break
 
             child2 = mutate(children[1], weights, binCapacity)

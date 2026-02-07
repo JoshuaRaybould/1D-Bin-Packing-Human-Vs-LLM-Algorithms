@@ -31,7 +31,7 @@ def reactiveGRASP(binCapacity, weights):
     for x in range(0, len(weights)):
         indexes.append(x)
     indexes.sort(key=lambda itemIndex: weights[itemIndex], reverse=True) # Saves time finding best and worst quality items
-    while iteration < 30:
+    while iteration < 10:
         iteration += 1
         
         toPack = indexes.copy()

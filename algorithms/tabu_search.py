@@ -62,7 +62,7 @@ def tabuSearch(binCapacity, weights, candidateSolution, fastSearch):
    lowerBound = helpers.getLowerBound(weights, binCapacity)
    totalIterations = 21500
    if fastSearch:
-      totalIterations = 1500
+      totalIterations = 2125
    iteration = 0
    while len(candidateSolution["bin_weights"]) > lowerBound and iteration < totalIterations:
       iteration += 1
