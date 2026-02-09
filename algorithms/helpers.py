@@ -68,11 +68,13 @@ def firstFitWithContainingBin(binCapacity, weights, decreasing):
     return bins
 
 
-def getStoppingSum(weights):
-    uniqueLen = len(set(weights))
+def getStoppingSum(weights, capacity):
     stoppingVal = 0
-    for x in range(len(weights) - 1, len(weights) - uniqueLen - 1, -1):
-        stoppingVal += weights[x]
+    for x in range(len(weights) - 1, -1, -1):
+        if weights[x] > capacity/2:
+            break
+        else:
+            stoppingVal += weights[x]
     return stoppingVal
 
 # Martello and Toth's lower bound
@@ -89,13 +91,15 @@ def getLowerBound(weights, binCapacity):
     I2Sum = 0
     I3Sum = 0
 
+    bestLowerBound = 0
+
     lowerBound = 0
 
     I2Pos = -1
 
     index = 0
-
-    stoppingSum = getStoppingSum(weightsCopy)
+    #worseLowerBound = math.ceil((sum(weights))/binCapacity)
+    stoppingSum = getStoppingSum(weightsCopy, binCapacity)
     while index < len(weightsCopy):
         if weightsCopy[index] <= binCapacity/2:
             curkIndex = index
@@ -127,18 +131,19 @@ def getLowerBound(weights, binCapacity):
 
     smallItemTerm = (I3Sum - (I2Size * binCapacity - I2Sum))/binCapacity
     lowerBound = I1andI2Const + max(0, math.ceil(smallItemTerm))
+    bestLowerBound = lowerBound
 
     stoppingSmallTerm = (stoppingSum - (I2Size * binCapacity - I2Sum))/binCapacity
-    stoppingPoint = I1andI2Const + math.ceil(stoppingSmallTerm)
+    stoppingPoint = I1andI2Const + max(0, math.ceil(stoppingSmallTerm))
 
     if stoppingPoint <= lowerBound:
-                return lowerBound
+        return lowerBound
 
     startPoint = curkIndex + 1
-
+    #print("I3 SUM " + str(I3Sum))
     # In this case all items are bigger than 1/2 capacity so each needs their own bin
     # (this should not be the case for our instances)
-    if index == len(weightsCopy):
+    if I2Pos == -1:
         print("Does your instance have very large items?")
         return len(weightsCopy)
     else:
@@ -146,10 +151,9 @@ def getLowerBound(weights, binCapacity):
             curkIndex = startPoint
             k = weightsCopy[curkIndex]
             I3Sum += k
-
             curkIndex += 1
 
-            while curkIndex < len(weightsCopy) and weightsCopy[curkIndex] == weightsCopy[startPoint]:
+            while curkIndex < len(weightsCopy) and weightsCopy[curkIndex] == k:
                 I3Sum += k
                 startPoint = curkIndex
                 curkIndex += 1
@@ -163,6 +167,8 @@ def getLowerBound(weights, binCapacity):
 
             smallItemTerm = (I3Sum - (I2Size * binCapacity - I2Sum))/binCapacity
             lowerBound = I1andI2Const + max(0, math.ceil(smallItemTerm))
+                
+            bestLowerBound = max(lowerBound, bestLowerBound)
             
             stoppingSmallTerm = (stoppingSum - (I2Size * binCapacity - I2Sum))/binCapacity
             stoppingPoint = I1andI2Const + math.ceil(stoppingSmallTerm)
@@ -171,9 +177,5 @@ def getLowerBound(weights, binCapacity):
                 return lowerBound
             
             startPoint = curkIndex
-        return lowerBound
-
-
-
-
-
+        
+        return bestLowerBound
