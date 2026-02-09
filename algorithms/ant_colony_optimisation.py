@@ -107,7 +107,7 @@ def antColonyOptimisation(binCapacity, weights):
    # Have each ant build a solution
    for y in range (0, 5):
       if bestSolutionSoFar and len(bestSolutionSoFar) == lowerBound:
-         bins = convertToBins(bestSolutionSoFar)
+         bins = convertToBins(bestSolutionSoFar, weights)
          return bins
       bestSolutionThisIterationFitness = 0
       bestSolutionThisIteration = []
