@@ -1,4 +1,4 @@
-dataset,algo,runs,time_sec,bins_used,optimal_bins,waste_bins,overall_ratio,num_instances,avg_ratio,comments
+dataset,algo,runs,time_sec,bins_used,optimal_bins,extra_bins,overall_ratio,num_instances,avg_ratio,comments
 test-u,fdo,5,98.51547849601775,25683,15275,10408,1.6813747954173486,20,1.8466790965950397,"chosen iterations=150, population=10, wf=0"
 test-u,fdo,5,97.2694578250157,25696,15275,10421,1.6822258592471357,20,1.8477523581773871,"iterations=120, population=12, wf=0"
 test-u,fdo,5,90.39528691300075,25697,15275,10422,1.682291325695581,20,1.8477043391321586,"iterations=170, population=8, wf=0"

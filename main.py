@@ -36,7 +36,11 @@ def build_parser():
          "our-u-100",
          "our-u-200",
          "our-u-400",
+         "our-u-600",
          "our-u-800",
+         "our-u-1000",
+         "our-u-1200",
+         "our-u-1400",
          "our-u-1600"
       ],
       help="Which instance set to load."
@@ -212,6 +216,7 @@ def applyAlgorithm(instances, chosenAlgorithm, runs):
       "overall_ratio": overall_ratio,
       "num_instances": len(instances),
       "avg_ratio": avg_ratio,
+      "num_items": len(instance["weights"])
    }
 
 
