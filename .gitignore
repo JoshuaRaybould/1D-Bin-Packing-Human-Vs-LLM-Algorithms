@@ -1,3 +1,6 @@
 __pycache__
 Instances
 *.out
+*.env
+.ipynb_checkpoints
+

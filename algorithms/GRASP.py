@@ -27,11 +27,14 @@ def reactiveGRASP(binCapacity, weights):
     bestSolution = []
     bestSolutionBins = float("infinity") 
 
-    weights.sort(reverse=True) # Saves time finding best and worst quality items
-    while iteration < 30:
+    indexes = []
+    for x in range(0, len(weights)):
+        indexes.append(x)
+    indexes.sort(key=lambda itemIndex: weights[itemIndex], reverse=True) # Saves time finding best and worst quality items
+    while iteration < 10:
         iteration += 1
         
-        toPack = weights.copy()
+        toPack = indexes.copy()
         candidateSolution = {}
         candidateSolution["packing"], candidateSolution["bin_weights"] = [], []
 
@@ -50,24 +53,30 @@ def reactiveGRASP(binCapacity, weights):
             bestItem = 0
             worstItem = -1
 
-            if candidateSolution["packing"] and candidateSolution["bin_weights"][-1] + toPack[-1] <= binCapacity:
+            smallestItem = toPack[-1]
+            if candidateSolution["packing"] and candidateSolution["bin_weights"][-1] + weights[smallestItem] <= binCapacity:
                 # There is still space in the last opened bin
-                while candidateSolution["bin_weights"][-1] + toPack[bestItem] > binCapacity:
+                curCandidate = toPack[bestItem]
+                while candidateSolution["bin_weights"][-1] + weights[curCandidate] > binCapacity:
                     bestItem += 1
+                    curCandidate = toPack[bestItem]
             else:
                 # Open new bin
                 candidateSolution["packing"].append([])
                 candidateSolution["bin_weights"].append(0)
 
-            minQuality = toPack[worstItem]
-            maxQuality = toPack[bestItem]
+            worstItemIndex = toPack[worstItem] # Its index in the weights array
+            minQuality = weights[worstItemIndex]
+            bestItemIndex = toPack[bestItem]
+            maxQuality = weights[bestItemIndex]
 
             alpha = alphaVals[alphaIndex]
             thresholdVal = minQuality + (1 - alpha) * (maxQuality - minQuality)
 
             worstAllowedIndex = bestItem
             for x in range(bestItem, len(toPack)):
-                if toPack[x] >= thresholdVal:
+                itemx = toPack[x]
+                if weights[itemx] >= thresholdVal:
                     worstAllowedIndex = x
                 else:
                     break
@@ -76,7 +85,7 @@ def reactiveGRASP(binCapacity, weights):
             packIndex = random.randint(bestItem, worstAllowedIndex)
 
             candidateSolution["packing"][-1].append(toPack[packIndex])
-            candidateSolution["bin_weights"][-1] += toPack[packIndex]
+            candidateSolution["bin_weights"][-1] += weights[toPack[packIndex]]
             toPack.pop(packIndex)
         
         candidateSolution = tabu_search.tabuSearch(binCapacity, weights, candidateSolution, True)
@@ -114,5 +123,4 @@ def reactiveGRASP(binCapacity, weights):
             if bestSolutionBins == lowerBound:
                 return bestSolution
     
-    # print(probabilities)
     return bestSolution

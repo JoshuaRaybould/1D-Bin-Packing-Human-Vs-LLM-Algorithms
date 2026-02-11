@@ -1,5 +1,5 @@
-### Comparing Randomised algorithms on the Bin Packing Problem
+### Comparing Randomised algorithms to LLM Generated Equivalents on the Bin Packing Problem
 
-The aim of this project is to implement a variety of randomised algorithms that can be applied to the bin packing problem and then analyse and compare their performance. 
+We implement a variety of randomised algorithms for the bin packing problem (BPP). We then prompt multiple LLMs to create the same algorithms so we can compare their implementations with our own and with each other in terms of correctness, performance, and efficiency.
 
-Additionally, I plan to compare the algorithms created by me to the same algorithms created entirely by generative AI.
+This project will act as a strong starting point for researchers interested in combinatorial optimisation, particularly the BPP. Additionally, it should help researchers and users alike understand the capabilities of currently available LLMs when it comes to implementing such algorithms.

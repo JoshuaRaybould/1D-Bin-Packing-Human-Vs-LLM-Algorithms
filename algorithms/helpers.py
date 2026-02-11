@@ -1,22 +1,21 @@
 import random
 import math
 
-# if index is true we put the index of the item in the packing rather than its weight
-def firstFit(binCapacity, weights, decreasing, index):
+def firstFit(binCapacity, weights, decreasing):
     bins = {}
     bins["packing"], bins["bin_weights"] = [], []
 
+    indexes = list(range(0, len(weights)))
+
     if decreasing:
-        weights.sort(reverse=True)
+        indexes.sort(key=lambda itemIndex: weights[itemIndex], reverse=True)
     else:
-        random.shuffle(weights)
+        random.shuffle(indexes)
         
     for x in range(0, len(weights)):
-        weight = weights[x]
+        weight = weights[indexes[x]]
 
-        valueToPutInPacking = weight
-        if index:
-            valueToPutInPacking = x
+        valueToPutInPacking = indexes[x]
         packed = False
 
         for b in range(0, len(bins["bin_weights"])):
@@ -30,16 +29,52 @@ def firstFit(binCapacity, weights, decreasing, index):
             bins["packing"].append([valueToPutInPacking])
             bins["bin_weights"].append(weight)
 
+    return bins
+
+# As the above implementation but gives us a way to quickly determine the bin an item is in 
+# This is necessary to distinguish items of same weight in some cases
+def firstFitWithContainingBin(binCapacity, weights, decreasing):
+    bins = {}
+    bins["packing"], bins["bin_weights"], bins["containing_bin"] = [], [], {}
+
+    # items are labelled 0 up to len(weights) - 1
+    # From https://stackoverflow.com/questions/18265935/how-do-i-create-a-list-with-numbers-between-two-values
+    indexes = list(range(0, len(weights)))
+
+    if decreasing:
+        indexes.sort(key=lambda itemIndex: weights[itemIndex], reverse=True)
+    else:
+        random.shuffle(indexes)
+
+    for x in range(0, len(indexes)):
+        weight = weights[indexes[x]]
+
+        valueToPutInPacking = indexes[x]
+        packed = False
+
+        for b in range(0, len(bins["bin_weights"])):
+            if bins["bin_weights"][b] + weight <= binCapacity:
+                bins["packing"][b].append(valueToPutInPacking)
+                bins["bin_weights"][b] += weight
+                bins["containing_bin"][indexes[x]] = b
+                packed = True
+                break
+
+        if not packed:
+            bins["packing"].append([valueToPutInPacking])
+            bins["bin_weights"].append(weight)
+            bins["containing_bin"][indexes[x]] = len(bins["bin_weights"]) - 1
 
     return bins
 
 
-
-def getStoppingSum(weights):
-    uniqueLen = len(set(weights))
+def getStoppingSum(weights, capacity):
     stoppingVal = 0
-    for x in range(len(weights) - 1, len(weights) - uniqueLen - 1, -1):
-        stoppingVal += weights[x]
+    for x in range(len(weights) - 1, -1, -1):
+        if weights[x] > capacity/2:
+            break
+        else:
+            stoppingVal += weights[x]
     return stoppingVal
 
 # Martello and Toth's lower bound
@@ -56,13 +91,15 @@ def getLowerBound(weights, binCapacity):
     I2Sum = 0
     I3Sum = 0
 
+    bestLowerBound = 0
+
     lowerBound = 0
 
     I2Pos = -1
 
     index = 0
-
-    stoppingSum = getStoppingSum(weightsCopy)
+    #worseLowerBound = math.ceil((sum(weights))/binCapacity)
+    stoppingSum = getStoppingSum(weightsCopy, binCapacity)
     while index < len(weightsCopy):
         if weightsCopy[index] <= binCapacity/2:
             curkIndex = index
@@ -94,18 +131,19 @@ def getLowerBound(weights, binCapacity):
 
     smallItemTerm = (I3Sum - (I2Size * binCapacity - I2Sum))/binCapacity
     lowerBound = I1andI2Const + max(0, math.ceil(smallItemTerm))
+    bestLowerBound = lowerBound
 
     stoppingSmallTerm = (stoppingSum - (I2Size * binCapacity - I2Sum))/binCapacity
-    stoppingPoint = I1andI2Const + math.ceil(stoppingSmallTerm)
+    stoppingPoint = I1andI2Const + max(0, math.ceil(stoppingSmallTerm))
 
     if stoppingPoint <= lowerBound:
-                return lowerBound
+        return lowerBound
 
     startPoint = curkIndex + 1
-
+    #print("I3 SUM " + str(I3Sum))
     # In this case all items are bigger than 1/2 capacity so each needs their own bin
     # (this should not be the case for our instances)
-    if index == len(weightsCopy):
+    if I2Pos == -1:
         print("Does your instance have very large items?")
         return len(weightsCopy)
     else:
@@ -113,10 +151,9 @@ def getLowerBound(weights, binCapacity):
             curkIndex = startPoint
             k = weightsCopy[curkIndex]
             I3Sum += k
-
             curkIndex += 1
 
-            while curkIndex < len(weightsCopy) and weightsCopy[curkIndex] == weightsCopy[startPoint]:
+            while curkIndex < len(weightsCopy) and weightsCopy[curkIndex] == k:
                 I3Sum += k
                 startPoint = curkIndex
                 curkIndex += 1
@@ -130,6 +167,8 @@ def getLowerBound(weights, binCapacity):
 
             smallItemTerm = (I3Sum - (I2Size * binCapacity - I2Sum))/binCapacity
             lowerBound = I1andI2Const + max(0, math.ceil(smallItemTerm))
+                
+            bestLowerBound = max(lowerBound, bestLowerBound)
             
             stoppingSmallTerm = (stoppingSum - (I2Size * binCapacity - I2Sum))/binCapacity
             stoppingPoint = I1andI2Const + math.ceil(stoppingSmallTerm)
@@ -138,9 +177,5 @@ def getLowerBound(weights, binCapacity):
                 return lowerBound
             
             startPoint = curkIndex
-        return lowerBound
-
-
-
-
-
+        
+        return bestLowerBound
