@@ -3,6 +3,7 @@ from pathlib import PurePosixPath
 from algorithms.helpers import getLowerBound
 import numpy as np
 import csv
+import math
 
 def loadNoSolInstances(instancesDir):
 
@@ -87,45 +88,51 @@ def loadInstances(instancesDir, solutions, solvedOnly):
 # An option has been included to choose to use just solved instances
 # If we include all instances then in cases they aren't solved we simply use the lower bound on the number of bins
 
-# Load the dataset of Random Generated instances
-def getRandomInstances():
-    instancesDir = Path("./Instances/Randomly_Generated")
-    randSolutions = Path("./Instances/Solutions/RandomInstanceSolutions.csv")
-
-    return loadInstances(instancesDir, randSolutions, True)
-
-# Load Falkenauer U dataset of 80 instances
+# Load Falkenauer U dataset of 80 instances total
 # The item sizes are uniformly distributed here
-def getFalkenauer():
-    instancesDir = Path("./Instances/Falkenauer_U")
+def getFalkenauer(n):
+    # n is number of items
+    if n == 120:
+        instancesDir = Path("./Instances/Falkenauer_U/Falkenauer_" + n)
+    elif n == 250:
+        instancesDir = Path("./Instances/Falkenauer_U/Falkenauer_" + n)
+    elif n == 500:
+        instancesDir = Path("./Instances/Falkenauer_U/Falkenauer_" + n)
+    else:
+        instancesDir = Path("./Instances/Falkenauer_U/Falkenauer_" + n)
+
     falkSolutions = Path("./Instances/Solutions/FalkenauerSolutions.csv")
 
     return loadInstances(instancesDir, falkSolutions, True)
 
-# Load ANI or AI datasets. These are intentionally difficult instances.
-def getHardInstances(version, solvedOnly):
-    # True for AI, False for ANI
-    if version:
-        instancesDir = Path("./Instances/Difficult_Instances/AI")
-        AISolutions = Path("./Instances/Solutions/AISolutions.csv")
-        return loadInstances(instancesDir, AISolutions, solvedOnly)
-    else:
-        instancesDir = Path("./Instances/Difficult_Instances/ANI")
-        ANISolutions = Path("./Instances/Solutions/ANISolutions.csv")
-        return loadInstances(instancesDir, ANISolutions, solvedOnly)
+# Load the dataset of Scholl instances
+def getSchollInstances(n):
+    # n is number of instances (10, 480, 720), the set of 10 being the hardest
+    instancesDir = Path("./Instances/Scholl/Scholl_" + n) 
+        
+    schollSolutions = Path("./Instances/Solutions/SchollSolutions.csv")
+    return loadInstances(instancesDir, schollSolutions, True)
 
-def particleSwarmTest():
-    instancesDir = Path("./Instances/BinPacking_OMP")
+# Load the Hard28 dataset
+def getHardInstances():
+    instancesDir = Path("./Instances/Hard28")
+    hardSolutions = Path("./Instances/Solutions/Hard28Solutions.csv")
+    return loadInstances(instancesDir, hardSolutions, True)
+
+# Get some test instances we generated
+def getTestInstances():
+    instancesDir = Path("./my_instances/test_u")
     return loadNoSolInstances(instancesDir)
 
-
-
+# Get uniform instances we generated
+def getOurUniformInstances(n):
+    instancesDir = Path("./my_instances/our_u_" + n)
+    return loadNoSolInstances(instancesDir)
 
 # Below are functions for generating a specific number instances with bins set to some capacity and number of items
 # The downside is the optimal won't be known for any
-# At least we can calculate a simple lower bound by doing ceil(total_weight/capacity)
+# At least we can calculate a lower bound on the optimal number (given by Martello, no worse than 3/4 the optimal)
 # The minimum possible weight takes inpiration from the randomly generated dataset from BPPLIB
-
 
 def createNormalDistribution(minimum, maximum, numItems, rng):
     mean = (maximum + minimum)/2
@@ -159,13 +166,15 @@ def getOurRandomInstances(numInstances, capacity, numItems, distribution):
         instanceInfo["bin_capacity"] = capacity
 
         minMultiplier = rng.integers(10, 31)
-        minimumWeight = (minMultiplier*capacity)/100
+        minimumWeight = math.ceil((minMultiplier*capacity)/100)
+        maxMultiplier = rng.integers(50, 71)
+        maximumWeight = math.ceil((maxMultiplier*capacity)/100)
 
         weights = []
         if distribution == "n":
             weights = createNormalDistribution(minimumWeight, capacity, numItems, rng) # Normal distribution
         else:
-            weights = rng.integers(low=minimumWeight, high=(capacity+1), size=numItems) # Uniform distribution
+            weights = rng.integers(low=minimumWeight, high=(maximumWeight+1), size=numItems) # Uniform distribution
         weights.sort()
         weights = (np.round(weights)).astype(int)
         instanceInfo["weights"] = weights.tolist()
@@ -176,5 +185,46 @@ def getOurRandomInstances(numInstances, capacity, numItems, distribution):
         instances.append(instanceInfo)
 
     return instances
+
+
+def writeInstanceTxt(instanceInfo, outFile: Path):
+    """
+    Write instances to file, in format:
+      line 1: number_of_items
+      line 2: bin_capacity
+      remaining lines: item weights
+    """
+    outFile.parent.mkdir(parents=True, exist_ok=True)
+
+    n = instanceInfo["number_of_items"]
+    capacity = instanceInfo["bin_capacity"]
+    weights = instanceInfo["weights"]
+
+    if len(weights) != n:
+        raise ValueError(f"number_of_items={n} but len(weights)={len(weights)}")
+
+    with outFile.open("w") as f:
+        f.write(str(n) + "\n")
+        f.write(str(capacity) + "\n")
+        for w in weights:
+            f.write(str(int(w)) + "\n")
+
+
+def saveInstancesAsTxt(instances, prefix):
+    """
+    Save instances as separate text files in outDir.
+    Returns the output directory as a Path.
+    """
+    outDir = "my_instances/" + str(prefix)
+    outDir = Path(outDir)
+    outDir.mkdir(parents=True, exist_ok=True)
+
+    for i, inst in enumerate(instances, start=1):
+
+        filename = f"{prefix}_{i:03d}.txt"
+        writeInstanceTxt(inst, outDir / filename)
+
+    return outDir
+
 
 
