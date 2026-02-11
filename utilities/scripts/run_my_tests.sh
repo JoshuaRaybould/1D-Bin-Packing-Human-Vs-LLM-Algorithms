@@ -17,12 +17,14 @@ fi
 
 MAIN="main.py"
 RUNS=5
-CSV="my_test_results.csv"
+#CSV="my_test_results.csv"
+CSV="falkenauer_results.csv"
 
-algos=(aco sa tabu gga vns fdo rbf grasp)
+algos=(rbf sa aco tabu gga vns fdo grasp)
 
 # sets=(our-u-100 our-u-200 our-u-400 our-u-800 our-u-1600)
 sets=(our-u-100 our-u-200 our-u-400 our-u-600 our-u-800 our-u-1000 our-u-1200 our-u-1400 our-u-1600)
+sets=(falkenauer-120 falkenauer-250 falkenauer-500 falkenauer-1000)
 
 for algo in "${algos[@]}"; do
   for setname in "${sets[@]}"; do
