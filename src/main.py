@@ -189,7 +189,7 @@ def applyAlgorithm(instances, chosenAlgorithm, runs):
    }
 
 
-def append_summary_to_csv(filename: str, row: dict, results_dir: str = "Results"):
+def append_summary_to_csv(filename: str, row: dict, results_dir: str = "../results"):
     # Create Results/ if it doesn't exist
     results_path = Path(results_dir)
     results_path.mkdir(parents=True, exist_ok=True)

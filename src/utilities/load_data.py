@@ -93,40 +93,40 @@ def loadInstances(instancesDir, solutions, solvedOnly):
 def getFalkenauer(n):
     # n is number of items
     if n == 120:
-        instancesDir = Path("./Instances/Falkenauer_U/Falkenauer_" + n)
+        instancesDir = Path("../datasets/Instances/Falkenauer_U/Falkenauer_" + n)
     elif n == 250:
-        instancesDir = Path("./Instances/Falkenauer_U/Falkenauer_" + n)
+        instancesDir = Path("../datasets/Instances/Falkenauer_U/Falkenauer_" + n)
     elif n == 500:
-        instancesDir = Path("./Instances/Falkenauer_U/Falkenauer_" + n)
+        instancesDir = Path("../datasets/Instances/Falkenauer_U/Falkenauer_" + n)
     else:
-        instancesDir = Path("./Instances/Falkenauer_U/Falkenauer_" + n)
+        instancesDir = Path("../datasets/Instances/Falkenauer_U/Falkenauer_" + n)
 
-    falkSolutions = Path("./Instances/Solutions/FalkenauerSolutions.csv")
+    falkSolutions = Path("../datasets/Instances/Solutions/FalkenauerSolutions.csv")
 
     return loadInstances(instancesDir, falkSolutions, True)
 
 # Load the dataset of Scholl instances
 def getSchollInstances(n):
     # n is number of instances (10, 480, 720), the set of 10 being the hardest
-    instancesDir = Path("./Instances/Scholl/Scholl_" + n) 
+    instancesDir = Path("../datasets/Instances/Scholl/Scholl_" + n) 
         
-    schollSolutions = Path("./Instances/Solutions/SchollSolutions.csv")
+    schollSolutions = Path("../datasets/Instances/Solutions/SchollSolutions.csv")
     return loadInstances(instancesDir, schollSolutions, True)
 
 # Load the Hard28 dataset
 def getHardInstances():
-    instancesDir = Path("./Instances/Hard28")
-    hardSolutions = Path("./Instances/Solutions/Hard28Solutions.csv")
+    instancesDir = Path("../datasets/Instances/Hard28")
+    hardSolutions = Path("../datasets/Instances/Solutions/Hard28Solutions.csv")
     return loadInstances(instancesDir, hardSolutions, True)
 
 # Get some test instances we generated
 def getTestInstances():
-    instancesDir = Path("./my_instances/test_u")
+    instancesDir = Path("../datasets/my_instances/test_u")
     return loadNoSolInstances(instancesDir)
 
 # Get uniform instances we generated
 def getOurUniformInstances(n):
-    instancesDir = Path("./my_instances/our_u_" + n)
+    instancesDir = Path("../datasets/my_instances/our_u_" + n)
     return loadNoSolInstances(instancesDir)
 
 # Below are functions for generating a specific number instances with bins set to some capacity and number of items
@@ -215,7 +215,7 @@ def saveInstancesAsTxt(instances, prefix):
     Save instances as separate text files in outDir.
     Returns the output directory as a Path.
     """
-    outDir = "my_instances/" + str(prefix)
+    outDir = "../datasets/my_instances/" + str(prefix)
     outDir = Path(outDir)
     outDir.mkdir(parents=True, exist_ok=True)
 
