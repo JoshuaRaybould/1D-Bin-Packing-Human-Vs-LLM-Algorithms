@@ -122,31 +122,6 @@ def load_instances(args):
    
    raise ValueError(f"Unknown set: {set_name}")
 
-def validatePacking(instance, packing):
-   totalWeight = sum(packing["bin_weights"])
-   if totalWeight - sum(instance["weights"]) != 0:
-      raise Exception("Error: weight of instance differs to sum of bin weights")
-   
-   seen = set()
-   for bin_pack in packing["packing"]:
-         for idx in bin_pack:
-            if idx in seen:
-                  raise Exception("Item packed twice")
-            seen.add(idx)
-   if len(seen) != len(instance["weights"]):
-         raise Exception("Missing items in packing")
-   
-   for binPack in packing["packing"]:
-      binWeight = 0
-      for index in binPack:
-         binWeight += instance["weights"][index]
-      if binWeight > instance["bin_capacity"]:
-         print(binWeight)
-         for index in binPack:
-            print(instance["weights"][index])
-         print(instance["bin_capacity"])
-         raise Exception("bin capacity exceeded")
-
 def applyAlgorithm(instances, chosenAlgorithm, runs):
    ratioScore = 0
    totalBins = 0
@@ -172,8 +147,6 @@ def applyAlgorithm(instances, chosenAlgorithm, runs):
          packing = chosenAlgorithm(instance["bin_capacity"], instance["weights"].copy())
          endTime = time.perf_counter()
          totalTime += (endTime - startTime)
-         
-         validatePacking(instance, packing)
 
          algBins = len(packing["bin_weights"])
 
@@ -182,12 +155,7 @@ def applyAlgorithm(instances, chosenAlgorithm, runs):
 
          totalBins += algBins
 
-         if algBins < optBins:
-            """ print(instance["bin_capacity"])
-            print(packing["bin_weights"])
-            print(packing["packing"])
-            print(instance["optimal_solution"])"""
-            raise Exception("Error: algorithm used fewer bins that the optimal")
+         test_correctness.quickValidatePacking(instance, packing, algBins, optBins)
          
          totalOpt += optBins
          ratioScore += (algBins/optBins)
@@ -195,26 +163,27 @@ def applyAlgorithm(instances, chosenAlgorithm, runs):
       if optBins == bestBins:
          optimalHits += 1
 
-   waste = totalBins - totalOpt
-   overall_ratio = (waste + totalOpt) / totalOpt
+   extraBins = totalBins - totalOpt
+   overall_ratio = (extraBins + totalOpt) / totalOpt
    avg_ratio = ratioScore / (len(instances) * runs)
 
    print("Time: " + str(totalTime))
    print("Bins used: " + str(totalBins))
    print("Optimal number of bins: " + str(totalOpt))
-   print("Waste (Excess bins): " + str(waste))
    print("Ratio of bins used by algorithm to bins used in optimal: " +  str(overall_ratio))
+   print("Extra bins (compared to optimal or lb): " + str(extraBins))
+   print("Average ratio of bins used by algorithm to bins used in optimal case: " + str(avg_ratio))
    print("Number of instances used: " + str(len(instances)))
    print("optimal was reached for " + str(optimalHits) + " of the instances")
-   print("Average ratio of bins used by algorithm to bins used in optimal case: " + str(avg_ratio))
 
    return {
       "time_sec": totalTime,
       "bins_used": totalBins,
       "optimal_bins": totalOpt,
-      "waste_bins": waste,
+      "extra_bins": extraBins,
       "overall_ratio": overall_ratio,
       "num_instances": len(instances),
+      "optimal_hits": optimalHits,
       "avg_ratio": avg_ratio,
       "num_items": len(instance["weights"])
    }
