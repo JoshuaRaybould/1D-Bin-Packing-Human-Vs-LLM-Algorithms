@@ -325,7 +325,7 @@ def scoreFitnesses(population, fitness):
     return best
 
 
-def groupingGeneticAlgorithm(binCapacity, weights):
+def groupingGeneticAlgorithm(binCapacity, weights, timeLimit):
 
     populationSize = 16
     elitistSize = 4

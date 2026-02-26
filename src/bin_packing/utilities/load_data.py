@@ -1,6 +1,6 @@
 from pathlib import Path
 from pathlib import PurePosixPath
-from algorithms.helpers import getLowerBound
+from bin_packing.algorithms.helpers import getLowerBound
 import numpy as np
 import csv
 import math
@@ -92,14 +92,7 @@ def loadInstances(instancesDir, solutions, solvedOnly):
 # The item sizes are uniformly distributed here
 def getFalkenauer(n):
     # n is number of items
-    if n == 120:
-        instancesDir = Path("../datasets/Instances/Falkenauer_U/Falkenauer_" + n)
-    elif n == 250:
-        instancesDir = Path("../datasets/Instances/Falkenauer_U/Falkenauer_" + n)
-    elif n == 500:
-        instancesDir = Path("../datasets/Instances/Falkenauer_U/Falkenauer_" + n)
-    else:
-        instancesDir = Path("../datasets/Instances/Falkenauer_U/Falkenauer_" + n)
+    instancesDir = Path("../datasets/Instances/Falkenauer_U/Falkenauer_" + n)
 
     falkSolutions = Path("../datasets/Instances/Solutions/FalkenauerSolutions.csv")
 

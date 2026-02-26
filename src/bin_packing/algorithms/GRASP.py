@@ -8,7 +8,7 @@ def everyAlphaUsed(averageCosts):
             return False
     return True
 
-def reactiveGRASP(binCapacity, weights):
+def reactiveGRASP(binCapacity, weights, timeLimit):
 
     alphaVals = [0.05, 0.1, 0.15]
     probabilities = []

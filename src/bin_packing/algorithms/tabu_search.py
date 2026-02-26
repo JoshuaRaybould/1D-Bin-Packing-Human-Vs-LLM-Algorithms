@@ -46,7 +46,7 @@ def getEmptiestBin(candidateSolution):
 
 # Perform search on given candidate solution
 # Set fastSearch true to reduce iterations
-def tabuSearch(binCapacity, weights, candidateSolution, fastSearch):
+def tabuSearch(binCapacity, weights, candidateSolution, fastSearch, timeLimit):
    movement = 0
    swapping = 0
    num2s = 0
@@ -209,10 +209,10 @@ def tabuSearch(binCapacity, weights, candidateSolution, fastSearch):
 
    return determineBest(bestSolution, candidateSolution)
 
-def tabuSearchFFD(binCapacity, weights):
+def tabuSearchFFD(binCapacity, weights, timeLimit):
     candidateSolution = helpers.firstFit(binCapacity, weights, True)
     return tabuSearch(binCapacity, weights, candidateSolution, False)
 
-#def tabuSearchFF(binCapacity, weights):
+#def tabuSearchFF(binCapacity, weights, timeLimit):
 #    candidateSolution = helpers.firstFit(binCapacity, weights, False)
 #    return tabuSearch(binCapacity, weights, candidateSolution, False)

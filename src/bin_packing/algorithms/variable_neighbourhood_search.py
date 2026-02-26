@@ -195,7 +195,7 @@ def shake(incumbentSolution, unmoved, weights, binCapacity):
     return incumbentSolution
         
 
-def variableNeighbourhoodSearch(binCapacity, weights, candidateSolution):
+def variableNeighbourhoodSearch(binCapacity, weights, candidateSolution, timeLimit):
     incumbentSolution = candidateSolution
     incumbentFitness = calcFitness(incumbentSolution)
 
@@ -233,8 +233,8 @@ def variableNeighbourhoodSearch(binCapacity, weights, candidateSolution):
 
     return incumbentSolution
 
-def variableNeighbourhoodSearchFFD(binCapacity, weights):
+def variableNeighbourhoodSearchFFD(binCapacity, weights, timeLimit):
     candidateSolution = helpers.firstFitWithContainingBin(binCapacity, weights, True)
-    return variableNeighbourhoodSearch(binCapacity, weights, candidateSolution)
+    return variableNeighbourhoodSearch(binCapacity, weights, candidateSolution, timeLimit)
 
 

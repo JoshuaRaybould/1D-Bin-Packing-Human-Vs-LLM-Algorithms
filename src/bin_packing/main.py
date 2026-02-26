@@ -1,12 +1,12 @@
-from utilities import load_data
-from utilities import test_correctness
+from bin_packing.utilities import load_data
+from bin_packing.utilities import test_correctness
 import argparse
 import csv
 from pathlib import Path
 import hashlib
 import random
 import time
-from algorithms import randomised_best_fit, simulated_annealing, grouping_genetic_algorithm, tabu_search, ant_colony_optimisation, GRASP, variable_neighbourhood_search, FDO
+from bin_packing.algorithms import randomised_best_fit, simulated_annealing, grouping_genetic_algorithm, tabu_search, ant_colony_optimisation, GRASP, variable_neighbourhood_search, FDO
 
 def build_parser():
    parser = argparse.ArgumentParser(
@@ -122,7 +122,7 @@ def load_instances(args):
    
    raise ValueError(f"Unknown set: {set_name}")
 
-def applyAlgorithm(instances, chosenAlgorithm, runs):
+def applyAlgorithm(instances, chosenAlgorithm, runs, timePerItem=1000): # 1000 being effectively unlimited
    ratioScore = 0
    totalBins = 0
    totalOpt = 0
@@ -130,6 +130,7 @@ def applyAlgorithm(instances, chosenAlgorithm, runs):
    optimalHits = 0
 
    for instance in instances:
+      timeLimit = len(instance["weights"]) * timePerItem
       bestBins = float("inf")
       optBins = instance["optimal_solution"]
       instanceId = instance["file_name"]
@@ -144,7 +145,7 @@ def applyAlgorithm(instances, chosenAlgorithm, runs):
          random.seed(curSeed)
 
          startTime = time.perf_counter()
-         packing = chosenAlgorithm(instance["bin_capacity"], instance["weights"].copy())
+         packing = chosenAlgorithm(instance["bin_capacity"], instance["weights"].copy(), timeLimit)
          endTime = time.perf_counter()
          totalTime += (endTime - startTime)
 

@@ -3,7 +3,7 @@ import random
 from . import helpers
 
 # Decreasing is to decide whether to use first fit with or without putting the data in decreasing order first
-def simulatedAnnealing(binCapacity, weights, decreasing):
+def simulatedAnnealing(binCapacity, weights, decreasing, timeLimit):
 
     temperature = 1000000
     cooling = 0.9995
@@ -102,8 +102,8 @@ def simulatedAnnealing(binCapacity, weights, decreasing):
 
     return candidateSolution
 
-def simulatedAnnealingFFD(binCapacity, weights):
-    return simulatedAnnealing(binCapacity, weights, True)
+def simulatedAnnealingFFD(binCapacity, weights, timeLimit):
+    return simulatedAnnealing(binCapacity, weights, True, timeLimit)
 
-#def simulatedAnnealingFF(binCapacity, weights):
-#    return simulatedAnnealing(binCapacity, weights, False)
+#def simulatedAnnealingFF(binCapacity, weights, timeLimit):
+#    return simulatedAnnealing(binCapacity, weights, False, timeLimit)

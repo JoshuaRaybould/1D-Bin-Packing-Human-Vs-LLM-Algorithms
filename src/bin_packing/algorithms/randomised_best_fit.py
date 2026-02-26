@@ -1,6 +1,6 @@
 import random
 
-def randomisedBestFit(binCapacity, weights):
+def randomisedBestFit(binCapacity, weights, timeLimit):
     # First randomise the order of the items. We will use the Fisher-Yates shuffle as it produces an unbiased permutation
     indexes = []
     for x in range(0, len(weights)):

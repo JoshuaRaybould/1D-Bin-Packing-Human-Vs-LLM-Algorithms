@@ -68,7 +68,7 @@ def updatePheromones(solution, fitness, pheromoneScores, weights):
             if x != y:
                pheromoneScores[(weights[bin[x]], weights[bin[y]])] += fitness
 
-def antColonyOptimisation(binCapacity, weights):
+def antColonyOptimisation(binCapacity, weights, timeLimit):
    populationSize = 4 # Number of "ant trails"
    evaporationParameter = 0.2
    heuristicImportance = 10

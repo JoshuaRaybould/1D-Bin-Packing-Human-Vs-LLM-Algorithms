@@ -60,7 +60,7 @@ def calcFitness(population, fitness):
             minFitnessIndex = x
     return (maxFitnessIndex, minFitnessIndex)
 
-def adaptiveFDO(binCapacity, weights):
+def adaptiveFDO(binCapacity, weights, timeLimit):
     populationSize = 10
     population = []
 
