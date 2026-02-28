@@ -1,6 +1,6 @@
 from openai import OpenAI
 from pydantic import BaseModel
-import prompts
+from . import prompts
 
 class PythonCode(BaseModel):
     reasoning: str
@@ -60,11 +60,11 @@ def correctnessOpenAIPrompt(algoName, prevCode, error):
 
     return event.code
 
-def performancePlanOpenAIPrompt(algoName, prevCode, performanceMetrics):
+def performancePlanOpenAIPrompt(algoName, prevCode, performanceMetrics, maxTime):
     client = OpenAI()
 
     systemPrompt = prompts.PLAN_SYSTEM_PROMPT
-    userPrompt = prompts.getPlanPrompt(algoName, prevCode, performanceMetrics)
+    userPrompt = prompts.getPlanPrompt(algoName, prevCode, performanceMetrics, maxTime)
 
     # Prompt to get plan for improving code performance
     response = client.responses.parse(
@@ -82,7 +82,7 @@ def performancePlanOpenAIPrompt(algoName, prevCode, performanceMetrics):
 
     event = response.output_parsed
 
-    return event.code
+    return event.plan
 
 def applyPerformancePlanOpenAIPrompt(algoName, prevCode, performancePlan):
     client = OpenAI()
@@ -108,11 +108,11 @@ def applyPerformancePlanOpenAIPrompt(algoName, prevCode, performancePlan):
 
     return event.code
 
-def performanceOpenAIPrompt(algoName, prevCode, performanceMetrics):
+def performanceOpenAIPrompt(algoName, prevCode, performanceMetrics, maxTime):
     client = OpenAI()
 
     systemPrompt = prompts.IMPROVEMENT_SYSTEM_PROMPT
-    userPrompt =  prompts.improvePerformancePrompt(algoName, prevCode, performanceMetrics)
+    userPrompt =  prompts.improvePerformancePrompt(algoName, prevCode, performanceMetrics, maxTime)
 
 
     # Prompt with the code and performance results to improve performance

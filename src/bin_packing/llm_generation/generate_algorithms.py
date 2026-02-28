@@ -2,150 +2,193 @@ from . import algorithms_tests
 from . import providers
 import bin_packing.main
 import bin_packing.utilities.load_data
+from pathlib import Path
 
-# If the algorithm takes longer than this on a single run we say it is not correct
-timeLimit = 40 
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
-numCandidates = 1
+numCandidates = 2
 
-#We have 1 intial propmpt to obtain an algorithm
-availablePrompts = 6 # We then have 5 available prompts to fix and improve the algorithm
-# After obtaining a working algorithm we apply a prompt to plan how to improve our algorithm then a prompt to apply this plan
-# (this part is not effected by the availablePrompt value above)
-
-# Total prompts is initial + correctness + plan + apply plan + performance improvement
-# correctness + performance improvement = availablePrompts. So total is initial + plan + apply plan + availablePrompts = 3 + availabePrompts
-
-promptsUsed = 0
+#We have 1 intial prompt to obtain an algorithm, 6 for fixing and improving and 2 for making and applying a plan after the first correct algorithm
+availablePrompts = 3
 
 algoName = "simulated annealing"
-algoNameForFile = "simulated_annealing"
+algoNameForFiles = "simulated_annealing"
 
 llmProviders = ["openai", "anthropic", "google"]
 chosenProvider = llmProviders[0]
 
-minCorrectnessTime = 20
+# File name, average bins used, results, code
+bestAlg = {"filename":"", "avg_ratio":float("infinity"), "results":None, "code":""}
 
-dir_name = "../llm_artifacts/generation/" + chosenProvider + "/"
+minCorrectnessTime = 20
+performanceRuns = 2
+# We now need initial performance metrics
+# We desire 20s total, and have 10 instances of 400 items, and 10 instances of 800 items
+# Average instance size = 600 items, and we desire a time of 1s on average giving 1/600
+timePerItem = 1/600 
+timePerRun = 20 # due to the above (this is purely for informing the LLM of time usage, it does not effect anything)
+
+def performanceImprovement(llmProviders, chosenProvider, name, filePath, resFileName, resultsDir,
+                           algoName, code, results, instances, timePerItem, minCorrectnessTime, performanceRuns, timePerRun):
+
+    if chosenProvider == llmProviders[0]: # openai
+        code = providers.performanceOpenAIPrompt(algoName, code, results, performanceRuns * timePerRun)
+
+        with filePath.open("w", encoding="utf-8", newline="\n") as f:
+            f.write(code)
+
+        # Again we still check we have correctness
+        correct, error, algorithm = algorithms_tests.testCorrectness(name, filePath, minCorrectnessTime)
+        
+        if correct:                
+            results = bin_packing.main.applyAlgorithm(instances, algorithm, performanceRuns, timePerItem)
+            results["algorithm"] =  name
+            print(results)
+            bin_packing.main.append_summary_to_csv(resFileName, results, resultsDir)
+            return correct, results, code
+        return correct, None, code
+    
+
+
+ARTIFACTS_DIR = PROJECT_ROOT / "llm_artifacts" / chosenProvider / algoNameForFiles
+ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+responsesDir = ARTIFACTS_DIR / "responses"
+responsesDir.mkdir(parents=True, exist_ok=True)
+resultsDir = ARTIFACTS_DIR
 
 for candidateNum in range(numCandidates):
+    promptsUsed = 0
+    bestCurAlgo = {"filename":"", "avg_ratio":float("infinity"), "results":None, "code":""}
 
-    name = algoNameForFile + "_" + str(candidateNum) + "_initial"
-    fileName = dir_name + name + ".py"
+    name = algoNameForFiles + "_" + str(candidateNum) + "_initial"
+    filePath = responsesDir / f"{name}.py"
     code = ""
 
     if chosenProvider == llmProviders[0]: # openai
         print("Do intiial")
         code = providers.initialOpenAIPrompt(algoName)
+        promptsUsed += 1
 
-        with open(fileName, "w", encoding="utf-8", newline="\n") as f:
+        with filePath.open("w", encoding="utf-8", newline="\n") as f:
             f.write(code)
 
-    correct, error, algorithm = algorithms_tests.testCorrectness(name, fileName, minCorrectnessTime)
+    correct, error, algorithm = algorithms_tests.testCorrectness(name, filePath, minCorrectnessTime)
     if not correct:
         print(error)
 
-    promptsUsed = 0
     # If the algorithm was not correct we reprompt, providing the code and error
     while not correct and promptsUsed < availablePrompts:
         print("Not correct")
-        name = algoNameForFile + "_" + str(candidateNum) + "_correctness_" + str(promptsUsed)
-        fileName = dir_name + name + ".py"
+        name = algoNameForFiles + "_" + str(candidateNum) + "_correctness_" + str(promptsUsed)
+        filePath = responsesDir / f"{name}.py"
 
         # Attempt to fix algorithm
         if chosenProvider == llmProviders[0]: # openai
             code = providers.correctnessOpenAIPrompt(algoName, code, error)
 
-            with open(fileName, "w", encoding="utf-8", newline="\n") as f:
+            with filePath.open("w", encoding="utf-8", newline="\n") as f:
                 f.write(code)
             
-        correct, error, algorithm = algorithms_tests.testCorrectness(name, fileName, minCorrectnessTime)
+        correct, error, algorithm = algorithms_tests.testCorrectness(name, filePath, minCorrectnessTime)
         if not correct:
             print(error)
-
         promptsUsed += 1
 
+
+    if not correct:
+        continue
     
     instances = bin_packing.utilities.load_data.getTestInstances()
 
-    curName = name
-    curCode = code
-    curAlgorithm = algorithm
+    resFileName = algoNameForFiles + "_results.csv"
 
-    resFile = dir_name + algoNameForFile + "_results.csv"
-    performanceRuns = 2
 
-    if correct:
-        print("Correct")
-        # We now need initial performance metrics
-        # We desire 20s total, and have 10 instances of 400 items, and 10 instances of 800 items
-        # Average instance size = 600 items, and we desire a time of 1s on average giving 1/600
+    print("Correct")
+    # We now need initial performance metrics
+    # We desire 20s total, and have 10 instances of 400 items, and 10 instances of 800 items
+    # Average instance size = 600 items, and we desire a time of 1s on average giving 1/600
 
-        timePerItem = 1/600 
-        results = bin_packing.main.applyAlgorithm(instances, curAlgorithm, performanceRuns, timePerItem)
-        results["algorithm"] =  curName
+    timePerItem = 1/600 
+    results = bin_packing.main.applyAlgorithm(instances, algorithm, performanceRuns, timePerItem)
+    results["algorithm"] =  name
 
-        bin_packing.main.append_summary_to_csv(resFile, results)
+    bestCurAlgo = {"filename":name, "avg_ratio":results["avg_ratio"], "results":results, "code":code}
+
+    bin_packing.main.append_summary_to_csv(resFileName, results, resultsDir)
+
+    # We do not have enough prompts left to plan and also apply the plan, so attempt to improve in a single prompt
+    if availablePrompts - promptsUsed == 1:
+        name = algoNameForFiles + "_" + str(candidateNum) + "_performance_" + str(promptsUsed)
+        filePath = responsesDir / f"{name}.py"
+
+        correct, results, code = performanceImprovement(llmProviders, chosenProvider, name, filePath, resFileName, resultsDir,
+                           algoName, code, results, instances, timePerItem, minCorrectnessTime, performanceRuns, timePerRun)
+
+        if not correct:
+            code = bestCurAlgo["code"]
+            results = bestCurAlgo["results"]
+        elif results is not None and results["avg_ratio"] < bestCurAlgo["avg_ratio"]:
+            bestCurAlgo = {"filename":name, "avg_ratio":results["avg_ratio"], "results":results, "code":code}
+        
+        promptsUsed += 1
     
-        planFileName =  dir_name + algoNameForFile + "_" + str(candidateNum) + "_plan.txt"
-        name =  algoNameForFile + "_" + str(candidateNum) + "_post_plan"
-        fileName = dir_name + name + ".py"
+        if bestCurAlgo["avg_ratio"] < bestAlg["avg_ratio"]:
+            bestAlg = bestCurAlgo
+        continue
 
-        performancePlan = providers.performancePlanOpenAIPrompt(algoName, curCode)
 
-        with open(planFileName, "w", encoding="utf-8", newline="\n") as f:
-            f.write(planFileName)
+        
+    planFileName = algoNameForFiles + "_" + str(candidateNum) + "_plan.txt"
+    planPath = responsesDir / planFileName
+    name =  algoNameForFiles + "_" + str(candidateNum) + "_post_plan"
+    filePath = responsesDir / f"{name}.py"
 
-        code = providers.applyPerformancePlanOpenAIPrompt(algoName, curCode, performancePlan)
+    performancePlan = providers.performancePlanOpenAIPrompt(algoName, code, results, performanceRuns * timePerRun)
+    promptsUsed += 1
 
-        with open(fileName, "w", encoding="utf-8", newline="\n") as f:
-            f.write(code)
+    with planPath.open("w", encoding="utf-8", newline="\n") as f:
+        f.write(performancePlan)
 
-        # We must now test we still have correctness, if this fails we revert back to the correct one (pre-plan)
-        # If it is correct we will assume it has at least not gotten worse than the previous one
-        correct, error, algorithm = algorithms_tests.testCorrectness(name, fileName, minCorrectnessTime)
-        if correct:
-            curName = name
-            curCode = code
-            curAlgorithm = algorithm
+    code = providers.applyPerformancePlanOpenAIPrompt(algoName, code, performancePlan)
+    promptsUsed += 1
 
-            # We now need initial performance metrics
-            # We desire 20s total, and have 10 instances of 400 items, and 10 instances of 800 items
-            # Average instance size = 600 items, and we desire a time of 1s on average giving 1/600
-            timePerItem = 1/600 
-            results = bin_packing.main.applyAlgorithm(instances, curAlgorithm, performanceRuns, timePerItem)
-            results["algorithm"] =  curName
-            print(results)
-            print("SURESURE")
+    with filePath.open("w", encoding="utf-8", newline="\n") as f:
+        f.write(code)
 
-            bin_packing.main.append_summary_to_csv(resFile, results)
-            print("RESfile")
-            print(resFile)
-            print("Resfile end")
+    # We must now test we still have correctness, if this fails we revert back to the correct one (pre-plan)
+    correct, error, algorithm = algorithms_tests.testCorrectness(name, filePath, minCorrectnessTime)
+    if correct:
 
-        while promptsUsed < availablePrompts:
-            name = algoNameForFile + "_" + str(candidateNum) + "_performance_" + str(promptsUsed)
-            fileName = dir_name + name + ".py"
+        results = bin_packing.main.applyAlgorithm(instances, algorithm, performanceRuns, timePerItem)
+        results["algorithm"] =  name
+        if results["avg_ratio"] < bestCurAlgo["avg_ratio"]:
+            bestCurAlgo = {"filename":name, "avg_ratio":results["avg_ratio"], "results":results, "code":code}
 
-            if chosenProvider == llmProviders[0]: # openai
-                code = providers.performanceOpenAIPrompt(algoName, curCode, results["time_sec"], results["avg_ratio"], results["extra_bins"])
+        print(results)
+        print("SURESURE")
 
-                with open(fileName, "w", encoding="utf-8", newline="\n") as f:
-                    f.write(code)
+        bin_packing.main.append_summary_to_csv(resFileName, results, resultsDir)
+        print("RESfile")
+        print(resFileName)
+        print("Resfile end")
 
-                # Again we still check we have correctness
-                correct, error, algorithm = algorithms_tests.testCorrectness(name, fileName, minCorrectnessTime)
-                if not correct:
-                    print(error)
-                
-                if correct:
-                    curName = name
-                    curCode = code
-                    curAlgorithm = algorithm
-                    
-                    results = bin_packing.main.applyAlgorithm(instances, curAlgorithm, performanceRuns, timePerItem)
-                    results["algorithm"] =  curName
-                    print(results)
-                    bin_packing.main.append_summary_to_csv(resFile, results)
+    while promptsUsed < availablePrompts:
+        name = algoNameForFiles + "_" + str(candidateNum) + "_performance_" + str(promptsUsed)
+        filePath = responsesDir / f"{name}.py"
+
+        correct, results, code = performanceImprovement(llmProviders, chosenProvider, name, filePath, resFileName, resultsDir,
+                           algoName, code, results, instances, timePerItem, minCorrectnessTime, performanceRuns, timePerRun)
+
+        if not correct:
+            code = bestCurAlgo["code"]
+            results = bestCurAlgo["results"]
+        elif results is not None and results["avg_ratio"] < bestCurAlgo["avg_ratio"]:
+            bestCurAlgo = {"filename":name, "avg_ratio":results["avg_ratio"], "results":results, "code":code}
             
-            promptsUsed += 1
+        promptsUsed += 1
+    
+    if bestCurAlgo["avg_ratio"] < bestAlg["avg_ratio"]:
+        bestAlg = bestCurAlgo
+
+
+print(bestAlg)

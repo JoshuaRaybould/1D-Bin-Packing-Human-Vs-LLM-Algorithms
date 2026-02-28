@@ -6,7 +6,7 @@ from bin_packing.utilities import load_data
 # from ..main import applyAlgorithm
 
 def loadModuleFromPath(path, name):
-    spec = importlib.util.spec_from_file_location(name, path)
+    spec = importlib.util.spec_from_file_location(name, str(path))
     if spec is None or spec.loader is None:
         raise ImportError(f"Could not create import spec for path={path}")
     module = importlib.util.module_from_spec(spec)
@@ -64,19 +64,19 @@ def testCorrectness(algoName, algoPath, minTime):
 
     startTime = time.perf_counter()
     res = solve(chosenInstance["bin_capacity"], chosenInstance["weights"], shortTimeLimit) 
-    timeUsed = startTime - time.perf_counter()
+    timeUsed = time.perf_counter() - startTime
     if timeUsed > 5 * shortTimeLimit:
         # Time limit has not been respected
-        return False, f"Time limit given to the algorithm was not respected: {e}", None
+        return False, f"Time limit given to the algorithm was not respected.", None
     
     longerTimeLimit = 0.1
     
     startTime = time.perf_counter()
     res = solve(chosenInstance["bin_capacity"], chosenInstance["weights"], longerTimeLimit) 
-    timeUsed = startTime - time.perf_counter()
+    timeUsed = time.perf_counter() - startTime
     if timeUsed > 2 * longerTimeLimit:
         # Time limit has not been respected
-        return False, f"Time limit given to the algorithm was not respected: {e}", None
+        return False, f"Time limit given to the algorithm was not respected.", None
 
         
     return True, "Success", solve

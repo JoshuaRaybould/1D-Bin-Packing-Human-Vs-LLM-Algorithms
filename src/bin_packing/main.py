@@ -8,6 +8,9 @@ import random
 import time
 from bin_packing.algorithms import randomised_best_fit, simulated_annealing, grouping_genetic_algorithm, tabu_search, ant_colony_optimisation, GRASP, variable_neighbourhood_search, FDO
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_RESULTS_DIR = PROJECT_ROOT / "results"
+
 def build_parser():
    parser = argparse.ArgumentParser(
       description="Run bin packing algorithms on selectable instance sets."
@@ -190,7 +193,7 @@ def applyAlgorithm(instances, chosenAlgorithm, runs, timePerItem=1000): # 1000 b
    }
 
 
-def append_summary_to_csv(filename: str, row: dict, results_dir: str = "../results"):
+def append_summary_to_csv(filename: str, row: dict, results_dir: str | Path = DEFAULT_RESULTS_DIR):
     # Create Results/ if it doesn't exist
     results_path = Path(results_dir)
     results_path.mkdir(parents=True, exist_ok=True)

@@ -39,6 +39,7 @@ Your task is to implement {algoName} for the 1D offline integer bin packing prob
 
 {COT}
 """
+    print(userPrompt)
     return userPrompt
 
 def getCorrectnessPrompt(algoName, code, error):
@@ -62,9 +63,14 @@ Error:
 
 {COT}
 """
+    print(userPrompt)
     return userPrompt
 
-def getPlanPrompt(algoName, prevCode, performanceMetrics):
+def getPlanPrompt(algoName, prevCode, performanceMetrics, maxTime):
+    avgRatio = performanceMetrics["avg_ratio"] 
+    extraBins = performanceMetrics["extra_bins"]
+    timeTaken = min(performanceMetrics["time_sec"], maxTime)
+
     userPrompt = f"""
 Your task is to plan how to improve this implementation of {algoName} for the 1D offline integer bin packing problem in Python.
 
@@ -74,7 +80,11 @@ Current implementation:
 Your goal is to produce a concrete, implementation‑ready plan that will improve the algorithm so it reaches stronger solutions within the given time limit.
 
 Performance feedback:
-{performanceMetrics}
+- Average ratio (bins used by algorithm divided by best known lower bound): {avgRatio}
+- Extra bins used over the lower bound: {extraBins}
+- Time used: {timeTaken} seconds out of the {maxTime}‑second budget.
+
+The algorithm is expected to use the entire time budget to search for better solutions. There is no penalty for longer runtimes; execution will simply stop at 100 seconds.
 
 Use this feedback to guide your improvements, focus on reducing the average ratio (the average number of bins used by the algorithm divided by the best available lower bound). Identify weaknesses and propose improvements.
 
@@ -84,6 +94,7 @@ The following hard requirements will be enforced when implementing your plan, so
 Do not write any code. Produce only a detailed plan.
 {COT}
 """
+    print(userPrompt)
     return userPrompt
 
 def applyPlanPrompt(algoName, code, plan):
@@ -103,12 +114,13 @@ Plan:
 
 {COT}
 """
+    print(userPrompt)
     return userPrompt
 
-def improvePerformancePrompt(algoName, code, performanceMetrics):
+def improvePerformancePrompt(algoName, code, performanceMetrics, maxTime):
     avgRatio = performanceMetrics["avg_ratio"] 
     extraBins = performanceMetrics["extra_bins"]
-    timeTaken = min(performanceMetrics["time_sec"], 100)
+    timeTaken = min(performanceMetrics["time_sec"], maxTime)
 
     userPrompt = f"""The following code implements the algorithm {algoName} for the 1D offline integer bin packing problem in Python.
 Code:
@@ -117,7 +129,7 @@ Code:
 Performance metrics:
 - Average ratio (bins used by algorithm divided by best known lower bound): {avgRatio}
 - Extra bins used over the lower bound: {extraBins}
-- Time used: {timeTaken} seconds out of the 100‑second budget.
+- Time used: {timeTaken} seconds out of the {maxTime}‑second budget.
 
 The algorithm is expected to use the entire time budget to search for better solutions. There is no penalty for longer runtimes; execution will simply stop at 100 seconds.
 
@@ -127,4 +139,5 @@ Please improve the code and adjust parameters where appropriate. The specifics o
 
 {COT}
 """
+    print(userPrompt)
     return userPrompt
