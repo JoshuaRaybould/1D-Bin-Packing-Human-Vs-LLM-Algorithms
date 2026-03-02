@@ -36,12 +36,33 @@ def testCorrectness(algoName, algoPath, minTime):
         try:
             startTime = time.perf_counter()
             res = solve(instance["bin_capacity"], instance["weights"], timeLimit) 
-            if not (isinstance(res, dict) and "packing" in res and "bin_weights" in res):
-                return False, "INVALID_OUTPUT: solve must return (binPacking, binWeights)", None
-            
             endTime = time.perf_counter()
+            if not isinstance(res, dict):
+                return False, "INVALID_OUTPUT: solve must return a dict with keys 'packing' and 'bin_weights'.", None
+
+            if "packing" not in res or "bin_weights" not in res:
+                return False, (
+                    "INVALID_OUTPUT: solve must return a dict with:\n"
+                    "- 'packing': list[list[int]] (item indices per bin)\n"
+                    "- 'bin_weights': list[float|int] (total weight per bin)\n"
+                    "Both lists must be aligned (len(bin_weights) == len(packing))."
+                ), None
+            
+            packing = res["packing"]
+            bin_weights = res["bin_weights"]
+
+            if not isinstance(packing, list) or not all(isinstance(b, list) for b in packing):
+                return False, "INVALID_OUTPUT: 'packing' must be a list of lists of item indices.", None
+
+            if not isinstance(bin_weights, list) or not all(isinstance(w, (int, float)) for w in bin_weights):
+                return False, "INVALID_OUTPUT: 'bin_weights' must be a list of numbers.", None
+
+            if len(packing) != len(bin_weights):
+                return False, "INVALID_OUTPUT: 'packing' and 'bin_weights' must be aligned (same length).", None
+                
             totalTime += (endTime - startTime)
-            print(totalTime)
+            if endTime - startTime > 2*timeLimit:
+                return False, "Time limit given to the algorithm was not respected.", None
         except Exception as e:
             tb = "\n".join(traceback.format_exc().splitlines()[-5:])
             return False, f"RUNTIME_ERROR: {type(e).__name__}: {e}\n{tb}", None
@@ -59,24 +80,41 @@ def testCorrectness(algoName, algoPath, minTime):
     
         
     # Check that it is actually staying true to the time limit
-    chosenInstance = instances[-1] # This will be a bigger instance
-    shortTimeLimit = 0.01
+    chosenInstance = instances[-1]
 
-    startTime = time.perf_counter()
-    res = solve(chosenInstance["bin_capacity"], chosenInstance["weights"], shortTimeLimit) 
-    timeUsed = time.perf_counter() - startTime
-    if timeUsed > 5 * shortTimeLimit:
-        # Time limit has not been respected
-        return False, f"Time limit given to the algorithm was not respected.", None
-    
-    longerTimeLimit = 0.1
-    
-    startTime = time.perf_counter()
-    res = solve(chosenInstance["bin_capacity"], chosenInstance["weights"], longerTimeLimit) 
-    timeUsed = time.perf_counter() - startTime
-    if timeUsed > 2 * longerTimeLimit:
-        # Time limit has not been respected
-        return False, f"Time limit given to the algorithm was not respected.", None
+    shortTimeLimit = 0.1
+    try:
+        startTime = time.perf_counter()
+        _ = solve(chosenInstance["bin_capacity"], chosenInstance["weights"], shortTimeLimit)
+        timeUsed = time.perf_counter() - startTime
+    except Exception as e:
+        return False, f"RUNTIME_ERROR_UNDER_TIME_LIMIT({shortTimeLimit}): {type(e).__name__}: {e}", None
 
+    if timeUsed > 0.2 + shortTimeLimit:
+        return False, "Time limit given to the algorithm was not respected.", None
+
+    longerTimeLimit = 0.5
+    try:
+        startTime = time.perf_counter()
+        _ = solve(chosenInstance["bin_capacity"], chosenInstance["weights"], longerTimeLimit)
+        timeUsed = time.perf_counter() - startTime
+    except Exception as e:
+        return False, f"RUNTIME_ERROR_UNDER_TIME_LIMIT({longerTimeLimit}): {type(e).__name__}: {e}", None
+
+    if timeUsed > 0.2 + longerTimeLimit:
+        return False, "Time limit given to the algorithm was not respected.", None
+    
+    # Check we still get valid solutions under small time budget
+    shortTimeBudget = 0.2
+    for instance in instances:
+        try:
+            res = solve(instance["bin_capacity"], instance["weights"], shortTimeBudget) 
+            packing = res["packing"]
+            bin_weights = res["bin_weights"]
+            algBins = len(packing)
+            optBins = instance["optimal_solution"]
+            test_correctness.validatePacking(instance, res, algBins, optBins)
+        except Exception as e:
+            return False, f"INVALID_ANSWER: {e}", None
         
     return True, "Success", solve
