@@ -2,6 +2,7 @@ from . import helpers
 import random
 import math
 import pickle
+import time
 
 def applyPace(currentSolution, weights, binCapacity, fitness, solIndex, pace):
     for move in pace:
@@ -61,6 +62,9 @@ def calcFitness(population, fitness):
     return (maxFitnessIndex, minFitnessIndex)
 
 def adaptiveFDO(binCapacity, weights, timeLimit):
+    start_time = time.time()
+    timeBudget = 0.95 * timeLimit
+
     populationSize = 10
     population = []
 
@@ -83,6 +87,9 @@ def adaptiveFDO(binCapacity, weights, timeLimit):
     iteration = 0
     maxIterations = 150
     while iteration < maxIterations and len(bestSolution["packing"]) != lowerBound:
+        elapsed = time.time() - start_time
+        if elapsed >= timeBudget:
+            break
  
         # Set worst solution to global best
         population[minFitnessIndex] = pickle.loads(pickle.dumps(bestSolution, -1))

@@ -2,6 +2,7 @@ import random
 from . import helpers
 import random
 import pickle
+import time
 
 totalTimeFitting = 0
 
@@ -326,6 +327,8 @@ def scoreFitnesses(population, fitness):
 
 
 def groupingGeneticAlgorithm(binCapacity, weights, timeLimit):
+    start_time = time.time()
+    timeBudget = 0.9 * timeLimit
 
     populationSize = 16
     elitistSize = 4
@@ -374,6 +377,9 @@ def groupingGeneticAlgorithm(binCapacity, weights, timeLimit):
     lowerBound = helpers.getLowerBound(weights, binCapacity)
     
     while generation < maxGeneration and bestBins > lowerBound:
+        elapsed = time.time() - start_time
+        if elapsed >= timeBudget:
+            break
 
         generation += 1
         parentIndexes = buildParentSets(population, elitistSize)
@@ -385,6 +391,8 @@ def groupingGeneticAlgorithm(binCapacity, weights, timeLimit):
             newPopulation.append(population[x]) 
             
         while len(newPopulation) < elitistSize + actualNumToCreate:
+            if elapsed >= timeBudget:
+                break
             goodParentIndex = parentIndexes["good"][curParentsIndex]
             randomParentIndex = parentIndexes["random"][curParentsIndex]
             curParentsIndex += 1
@@ -397,10 +405,16 @@ def groupingGeneticAlgorithm(binCapacity, weights, timeLimit):
 
             if prob > crossoverMinPercent:
                 children[0] = crossover(population[goodParentIndex], population[randomParentIndex], weights, binCapacity)
+                elapsed = time.time() - start_time
+                if elapsed >= timeBudget:
+                    break
                 children[1] = crossover(population[randomParentIndex], population[goodParentIndex], weights, binCapacity)
             else:
                 children = [population[goodParentIndex], population[randomParentIndex]]
 
+            elapsed = time.time() - start_time
+            if elapsed >= timeBudget:
+                break
             # Mutation
             child1 = mutate(children[0], weights, binCapacity)
             newPopulation.append(child1)
@@ -413,6 +427,8 @@ def groupingGeneticAlgorithm(binCapacity, weights, timeLimit):
 
         position = elitistSize
         while len(newPopulation) < populationSize:
+            if elapsed >= timeBudget:
+                break
             child = mutate(population[position], weights, binCapacity)
             newPopulation.append(child)
             position += 1

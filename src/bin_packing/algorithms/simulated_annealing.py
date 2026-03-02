@@ -1,9 +1,12 @@
 import math
 import random
 from . import helpers
+import time
 
 # Decreasing is to decide whether to use first fit with or without putting the data in decreasing order first
 def simulatedAnnealing(binCapacity, weights, decreasing, timeLimit):
+    start_time = time.time()
+    timeBudget = 0.95 * timeLimit
 
     temperature = 1000000
     cooling = 0.9995
@@ -13,7 +16,9 @@ def simulatedAnnealing(binCapacity, weights, decreasing, timeLimit):
     lowerBound = helpers.getLowerBound(weights, binCapacity)
     iteration = 0
     while len(candidateSolution["bin_weights"]) > lowerBound and temperature > 0.01 and iteration < 1500000:
-        iteration += 1
+        elapsed = time.time() - start_time
+        if elapsed >= timeBudget:
+            break
 
         # It is only possible to improve the solution if there are at least 2 bins. This is guaranteed by the lowerBound condition in the loop (so no explicit check here)
         # Select at random 2 bins

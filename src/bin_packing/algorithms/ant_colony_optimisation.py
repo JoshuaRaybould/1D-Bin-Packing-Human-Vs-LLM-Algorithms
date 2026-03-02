@@ -1,6 +1,7 @@
 import random
 import math
 from . import helpers
+import time
 
 def convertToBins(solution, weights):
    bins = {}
@@ -69,6 +70,9 @@ def updatePheromones(solution, fitness, pheromoneScores, weights):
                pheromoneScores[(weights[bin[x]], weights[bin[y]])] += fitness
 
 def antColonyOptimisation(binCapacity, weights, timeLimit):
+   start_time = time.time()
+   timeBudget = 0.95 * timeLimit
+
    populationSize = 4 # Number of "ant trails"
    evaporationParameter = 0.2
    heuristicImportance = 10
@@ -106,6 +110,10 @@ def antColonyOptimisation(binCapacity, weights, timeLimit):
 
    # Have each ant build a solution
    for y in range (0, 5):
+      elapsed = time.time() - start_time
+      if elapsed >= timeBudget:
+         return convertToBins(bestSolutionSoFar, weights)
+
       if bestSolutionSoFar and len(bestSolutionSoFar) == lowerBound:
          bins = convertToBins(bestSolutionSoFar, weights)
          return bins
@@ -115,9 +123,11 @@ def antColonyOptimisation(binCapacity, weights, timeLimit):
          antIndexSet = indexes.copy()
          curAntSol = []
          while antIndexSet:
+            elapsed = time.time() - start_time
+            if elapsed >= timeBudget:
+                  return convertToBins(bestSolutionSoFar, weights)
             pickWeightIndex(curAntSol, antIndexSet, pheromoneScores, pheromoneImportance, heuristicImportance, binCapacity, weights)
          
-   
          fitness = 0
          for group in curAntSol:
             groupWeight = 0
@@ -135,6 +145,10 @@ def antColonyOptimisation(binCapacity, weights, timeLimit):
       
       for pair in pheromoneScores:
          pheromoneScores[pair] *= evaporationParameter
+      
+      elapsed = time.time() - start_time
+      if elapsed >= timeBudget:
+         return convertToBins(bestSolutionSoFar, weights)
 
       if y % iterationsBetweenGlobalReinforcement == 0:
          # update pheromone using best

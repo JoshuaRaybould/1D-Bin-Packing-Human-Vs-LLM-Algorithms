@@ -1,6 +1,7 @@
 import pickle
 import random
 from . import helpers
+import time
 
 def calcFitness(solution):
     fitness = 0
@@ -196,6 +197,9 @@ def shake(incumbentSolution, unmoved, weights, binCapacity):
         
 
 def variableNeighbourhoodSearch(binCapacity, weights, candidateSolution, timeLimit):
+    start_time = time.time()
+    timeBudget = 0.95 * timeLimit
+
     incumbentSolution = candidateSolution
     incumbentFitness = calcFitness(incumbentSolution)
 
@@ -216,6 +220,10 @@ def variableNeighbourhoodSearch(binCapacity, weights, candidateSolution, timeLim
         k = 1
 
         while k < kMax + 1:
+            elapsed = time.time() - start_time
+            if elapsed >= timeBudget:
+                return incumbentSolution
+
             if len(incumbentSolution["packing"]) == lowerBound:
                 return incumbentSolution
             unmoved = indexArr.copy()

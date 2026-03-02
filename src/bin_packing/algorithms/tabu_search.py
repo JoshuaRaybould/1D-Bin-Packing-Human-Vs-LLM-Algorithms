@@ -1,6 +1,7 @@
 import pickle
 import random
 from . import helpers
+import time
 
 def determineBest(bestSolution, candidateSolution):
    bestSolScore = 0
@@ -47,6 +48,9 @@ def getEmptiestBin(candidateSolution):
 # Perform search on given candidate solution
 # Set fastSearch true to reduce iterations
 def tabuSearch(binCapacity, weights, candidateSolution, fastSearch, timeLimit):
+   start_time = time.time()
+   timeBudget = 0.95 * timeLimit
+
    movement = 0
    swapping = 0
    num2s = 0
@@ -65,6 +69,9 @@ def tabuSearch(binCapacity, weights, candidateSolution, fastSearch, timeLimit):
       totalIterations = 2125
    iteration = 0
    while len(candidateSolution["bin_weights"]) > lowerBound and iteration < totalIterations:
+      elapsed = time.time() - start_time
+      if elapsed >= timeBudget:
+            break
       iteration += 1
 
       # We select the best of these neighbours provided none are in the tabu list
@@ -211,7 +218,7 @@ def tabuSearch(binCapacity, weights, candidateSolution, fastSearch, timeLimit):
 
 def tabuSearchFFD(binCapacity, weights, timeLimit):
     candidateSolution = helpers.firstFit(binCapacity, weights, True)
-    return tabuSearch(binCapacity, weights, candidateSolution, False)
+    return tabuSearch(binCapacity, weights, candidateSolution, False, timeLimit)
 
 #def tabuSearchFF(binCapacity, weights, timeLimit):
 #    candidateSolution = helpers.firstFit(binCapacity, weights, False)
