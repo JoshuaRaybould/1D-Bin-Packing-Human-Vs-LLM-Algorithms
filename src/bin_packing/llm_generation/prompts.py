@@ -27,7 +27,8 @@ HARD_REQUIREMENTS = """Hard requirements:
 - Randomness must use only Python’s global `random` module. Do not call random.seed() inside solve.
 - The code must not execute anything at import time.
 - Do not use external libraries beyond the Python standard library.
-- The implementation should aim for strong, competitive solutions rather than trivial heuristics."""
+- The implementation should aim for strong, competitive solutions rather than trivial heuristics.
+- The implementation must use the algorithmic family I specify as its primary search method. Local search or any other secondary technique may be included only when it is a standard, essential component of that algorithmic family (for example, GRASP requires local search). It must not be added for performance reasons or used in algorithm families where it is not inherently required."""
 
 def getInitialPrompt(algoName):
     userPrompt = f"""
@@ -39,7 +40,7 @@ Your task is to implement {algoName} for the 1D offline integer bin packing prob
 
 {COT}
 """
-    print(userPrompt)
+    print("Initial prompt")
     return userPrompt
 
 def getCorrectnessPrompt(algoName, code, error):
@@ -63,7 +64,7 @@ Error:
 
 {COT}
 """
-    print(userPrompt)
+    print("Correctness prompt")
     return userPrompt
 
 def getPlanPrompt(algoName, prevCode, performanceMetrics, maxTime):
@@ -94,7 +95,7 @@ The following hard requirements will be enforced when implementing your plan, so
 Do not write any code. Produce only a detailed plan.
 {COT}
 """
-    print(userPrompt)
+    print("Get Plan")
     return userPrompt
 
 def applyPlanPrompt(algoName, code, plan):
@@ -104,7 +105,7 @@ def applyPlanPrompt(algoName, code, plan):
 
 {HARD_REQUIREMENTS}
 
-Follow the plan exactly. Do not omit steps or introduce ideas that are not present in the plan.
+Follow the plan exactly. You may omit steps if they are not useful but do not introduce ideas that are not present in the plan.
 
 Code:
 {code}
@@ -114,7 +115,7 @@ Plan:
 
 {COT}
 """
-    print(userPrompt)
+    print("Apply plan")
     return userPrompt
 
 def improvePerformancePrompt(algoName, code, performanceMetrics, maxTime):
@@ -139,5 +140,5 @@ Please improve the code and adjust parameters where appropriate. The specifics o
 
 {COT}
 """
-    print(userPrompt)
+    print("Improve performance")
     return userPrompt
