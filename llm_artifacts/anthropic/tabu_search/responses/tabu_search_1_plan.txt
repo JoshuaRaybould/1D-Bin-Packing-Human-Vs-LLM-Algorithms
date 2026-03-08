@@ -1,0 +1,128 @@
+# Detailed Implementation Plan: Penalty-Based Tabu Search for Bin Packing
+
+## Overview
+Replace the current approach with a penalty-based tabu search that tries to reduce the number of bins one at a time. The key idea: force all items into (K-1) bins (allowing overfilling), then use tabu search to minimize total overflow until a feasible packing is found.
+
+## Phase 1: Initial Solution & Lower Bound
+
+### 1.1 Initial Solution
+- Keep FFD and BFD, select the one with fewer bins.
+- Additionally implement First Fit Decreasing with Worst Fit tiebreaking (place in bin with most remaining capacity if multiple fit) as a third option.
+
+### 1.2 Lower Bound (L2)
+- Compute the continuous lower bound: L1 = ceil(sum(weights) / bin_capacity)
+- Compute L2: For each threshold t from 1 to bin_capacity//2, count items > bin_capacity - t, count items ≤ t that can't pair with larger items. Use the standard L2 formula: for a given t, L2(t) = n1 + n2 + max(0, ceil((sum_of_remaining - (n2*C - sum_of_large)) / C)) where n1 = items > C-t, n2 = items in (C/2, C-t], remaining = items ≤ t. Compute for several threshold values and take max.
+- Use L2 as a stopping criterion.
+
+## Phase 2: Core Tabu Search — Overflow Minimization
+
+### 2.1 Data Structures
+- `item_to_bin[i]`: which bin item i is in (0 to K-2 for target K-1 bins)
+- `bin_weight[b]`: total weight of bin b
+- `overflow[b]`: max(0, bin_weight[b] - bin_capacity)
+- `total_overflow`: sum of all overflow[b]
+- `tabu_dict`: dictionary mapping (item, bin) → expiry iteration. Item cannot be moved TO this bin until expiry.
+- `weights_arr`: direct array reference for speed
+
+### 2.2 Bin Reduction Loop
+```
+while num_bins > lower_bound and time_remaining:
+    target_bins = num_bins - 1
+    
+    # Choose which bin to eliminate: try the lightest bin
+    # Redistribute its items to other bins using best-fit
+    # This creates the initial (possibly infeasible) K-1 bin solution
+    
+    # Run tabu search to minimize total_overflow
+    # If total_overflow reaches 0: feasible! Save and try target_bins - 1
+    # If stuck after many iterations: try eliminating a different bin, or give up
+```
+
+### 2.3 Redistribution Strategy
+- Sort items from the eliminated bin by weight (descending)
+- Use best-fit to place each item among the remaining (K-1) bins, allowing overfill
+- This minimizes initial overflow
+
+### 2.4 Tabu Search Neighborhoods
+
+**Move neighborhood (primary):**
+- For each item in an overfilled bin, consider moving it to every other bin
+- Evaluate: change in total_overflow = change_in_overflow(from_bin) + change_in_overflow(to_bin)
+- For efficiency: only iterate items in overfilled bins (since moving from a non-overfilled bin never helps reduce overflow directly)
+- But also consider: moving items FROM non-overfilled bins to overfilled bins if it creates space (via swap logic below)
+
+**Swap neighborhood (secondary):**
+- For each item_a in an overfilled bin and item_b in another bin where weight[item_a] > weight[item_b]:
+  - Evaluate swapping them
+  - This helps when a large item in an overfilled bin can trade with a small item elsewhere
+- For efficiency: for each overfilled bin, sort its items by weight descending; for each other bin, consider only items lighter than the overfilled item AND where the swap doesn't create worse overflow
+
+**Neighborhood evaluation optimization:**
+- Only evaluate moves involving overfilled bins (either source or destination)
+- For moves out of overfilled bin b: the overflow reduction from b is min(overflow[b], weight[item]). The overflow increase at destination d is max(0, bin_weight[d] + weight[item] - bin_capacity) - overflow[d].
+- Pre-compute which bins are overfilled at start of each iteration
+- Limit swap evaluations: for each overfilled bin, only try swapping its heaviest items with lighter items in bins with most remaining capacity
+
+### 2.5 Tabu Management
+- **Tabu attribute**: When item i is moved FROM bin b, add tabu (i, b) meaning item i cannot move back TO bin b for tabu_tenure iterations
+- **Tabu tenure**: Start at max(7, n//10). Use reactive scheme: if the search revisits a total_overflow value frequently, increase tenure; if no improvement for a while, decrease it.
+- **Aspiration criterion**: Accept a tabu move if it results in total_overflow < best_overflow_seen_in_this_phase
+
+### 2.6 Selection Strategy
+- Evaluate ALL moves in the neighborhood (or a large sample for large instances)
+- Select the best non-tabu move (or best tabu move passing aspiration)
+- This is the classic "best-admissible" strategy for tabu search
+
+### 2.7 Efficiency Optimizations for Large Instances
+- **Incremental evaluation**: Don't re-evaluate all moves from scratch. After making a move, only re-evaluate moves involving the two affected bins.
+- **Candidate list**: Maintain a sorted candidate list of moves. Only rescan fully every K iterations.
+- **Time check**: Check time every 500 iterations (not every 100) to reduce overhead.
+- **Limit neighborhood for large n**: If n > 500, sample at most 200 items from overfilled bins and 200 items from target bins for swap evaluation.
+- **Weight-indexed structures**: Group items by weight. For swaps, only consider weight pairs where w_a > w_b (net improvement direction).
+
+### 2.8 Restart / Diversification within a Phase
+- If no improvement in total_overflow for 200 iterations: 
+  - Do a perturbation: randomly move 3-5 items from overfilled bins to random other bins
+  - Reset tabu tenure to a random value in [n//20, n//5]
+- If no improvement for 1000 iterations:
+  - Restart the phase: re-eliminate a DIFFERENT bin (try the 2nd lightest, 3rd lightest, or a random bin)
+  - Full tabu clear
+- Track which bins have been tried for elimination to avoid repeats
+
+## Phase 3: Feasibility Maintenance
+
+### 3.1 When total_overflow reaches 0
+- Save the current feasible solution as the new best
+- Compact bin indices (remove gaps)
+- Try to reduce by one more bin
+- Reset all tabu structures
+
+### 3.2 Multiple Elimination Attempts
+- For each target bin count, try eliminating up to 5 different bins before giving up
+- Allocate time budget proportionally: more time for harder reductions (fewer bins)
+
+## Phase 4: Output Construction
+
+### 4.1 Final Output
+- Convert the best feasible solution to the required format
+- Reindex bins to be contiguous 0..K-1
+- Compute bin_weights from the packing
+
+## Implementation Checklist
+1. `solve(bin_capacity, weights, time_limit)` function signature
+2. Compute L1 and L2 lower bounds
+3. Generate initial solution via FFD, BFD, WFD — take best
+4. Main loop: while bins > LB and time remains
+   a. Choose bin to eliminate (lightest first)
+   b. Redistribute items
+   c. Tabu search inner loop on overflow minimization
+   d. On success: save, continue reducing
+   e. On failure: try different bin, or break
+5. Return best feasible solution found
+
+## Expected Impact
+- The penalty-based approach is far more effective than the current "only make feasible moves" approach because it can explore infeasible intermediate states
+- Better overflow-focused neighborhoods ensure computational effort targets the actual bottleneck
+- Proper aspiration and reactive tabu tenure prevent both cycling and stagnation
+- L2 lower bound prevents wasting time on impossible improvements
+- Expected to reduce the 140 extra bins significantly, potentially to ~50-80 extra bins (ratio ~1.005-1.008)

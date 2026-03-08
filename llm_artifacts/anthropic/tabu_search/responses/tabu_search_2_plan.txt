@@ -1,0 +1,99 @@
+## Detailed Implementation Plan
+
+### 1. Time Budget Extension
+- Change the time check from `time_limit * 0.90` to `time_limit * 0.95` (the time_limit is now 100s, giving us ~95 seconds of search time).
+- Check time every 100 iterations instead of 200 for finer-grained control.
+
+### 2. Compute Tighter Lower Bound (L2)
+- Before entering the main loop, compute the L2 lower bound from Martello & Toth:
+  - Count items in three classes: large (weight > C/2), medium (C/3 < weight ≤ C/2), small (weight ≤ C/3).
+  - Use the standard L2 formula: L2 = L1 + max(0, ceil of residual small items that don't fit with large items).
+  - Set `target_bins = max(L2, target_bins)` as a floor so we never try targets below L2.
+  - This avoids wasting time on provably infeasible target bin counts.
+
+### 3. Better Initial Solution
+- Keep FFD as the primary initial heuristic.
+- Also try Best Fit Decreasing (BFD) and keep whichever uses fewer bins.
+- This takes negligible time but may start with a better solution.
+
+### 4. Improved Merge Strategy for Target Initialization
+- When reducing from `best_num_bins` to `target_bins`, instead of always merging the single lightest bin:
+  - Try 5 different random merge orderings (random pairs of bins to merge).
+  - For each, compute the total overflow.
+  - Start the tabu search from the merge with lowest overflow.
+- This gives the tabu search a better starting point.
+
+### 5. Add (1,2)-Interchange Moves (Critical Improvement)
+- This is the most important change. For each item `i` in an overflowing bin `ob`:
+  - For each target bin `tb`:
+    - **Transfer**: move `i` from `ob` to `tb` (already implemented).
+    - **(1,2)-swap**: move `i` from `ob` to `tb`, and move back a pair of items `(j, k)` from `tb` to `ob`, where `weights[j] + weights[k] < weights[i]`.
+- Implementation approach for (1,2)-swaps:
+  - For each target bin `tb`, sort its items by weight.
+  - For item `i` with weight `w_i` being moved to `tb`, the net weight change in `ob` is `-w_i + w_j + w_k`, and in `tb` is `+w_i - w_j - w_k`.
+  - We want to maximize `w_j + w_k` while keeping `w_j + w_k < w_i` (to ensure ob's overflow decreases) and `current_loads[tb] + w_i - w_j - w_k ≤ bin_capacity` (ideally).
+  - For efficiency: for each `j` in `tb`, binary search for the largest `k` such that `w_j + w_k ≤ w_i - 1` (or up to the amount needed). Use sorted item lists per bin.
+  - Limit: sample up to 8 items as `j` candidates per target bin, then binary search for best `k`.
+- Compute delta as change in total overflow across both bins.
+- Apply same tabu/aspiration logic: tabu on `(i, ob)`, `(j, tb)`, `(k, tb)`.
+
+### 6. Neighborhood Exploration Adjustments
+- Increase sampling limits since we have more time:
+  - Sample up to 5 overflow bins (from 3).
+  - Sample up to 20 items per overflow bin (from 15).
+  - Sample up to 8 target bins for swaps (from 5).
+  - Sample up to 15 items per target bin for 1-1 swaps (from 10).
+- For (1,2) moves, sample up to 5 target bins, 8 first-items per bin.
+- Make sampling adaptive: if `num_bins` is small (<10), don't sample at all.
+
+### 7. Adaptive Tabu Tenure
+- Start with `tabu_tenure = max(7, int(n ** 0.5))`.
+- Track a hash of the current overflow pattern (tuple of sorted overflows per bin).
+- If we detect cycling (same overflow pattern seen within last 50 iterations), increase tenure by 3.
+- If no improvement for 500 iterations, decrease tenure by 2 (min 5).
+- This reactive approach helps escape cycles while maintaining diversity.
+
+### 8. Remove Restart Limit, Add Stronger Perturbation
+- Remove the `max_restarts = 5` limit.
+- Instead, use a restart counter that increases perturbation strength:
+  - Restart 1-3: perturb `n/10` random items.
+  - Restart 4-6: perturb `n/5` random items.
+  - Restart 7+: reconstruct solution by randomly emptying 2-3 bins and re-inserting items via BFD into remaining bins.
+- Continue restarting as long as time permits.
+- Increase `max_iter_no_improve` to `max(5000, n * 30)` for the first attempt, then reduce to `max(2000, n * 15)` for subsequent restarts to cycle faster.
+
+### 9. Fix Overflow Tracking
+- When applying a move from `tie_candidates`, recalculate the actual delta for the chosen move rather than using `best_move_delta`. This is actually correct in the current code since all tie candidates have the same delta, but to be safe, compute the delta from the chosen move directly.
+- Actually, this is fine as-is. Keep it.
+
+### 10. Strategic Oscillation (Minor)
+- After finding a feasible solution for `target_bins`, immediately try `target_bins - 1`.
+- If we've been stuck on a target for more than 60% of remaining time, break and return best solution found.
+
+### 11. Pre-computation and Data Structure Improvements
+- Maintain a sorted list of items per bin (sorted by weight) to speed up (1,2)-swap candidate generation. Update these lists on each move.
+  - Use `bisect` module for efficient insertion/removal in sorted lists.
+- Pre-compute weight array as a tuple for faster indexing.
+- Use `item_bin` array consistently to avoid scanning bins for item membership.
+
+### 12. Implementation Order and Structure
+1. Add L2 lower bound computation at the top.
+2. Add BFD initial solution alongside FFD, keep better.
+3. Implement improved merge strategy with multiple random attempts.
+4. Restructure main tabu search loop:
+   a. Maintain sorted item lists per bin using `bisect`.
+   b. Generate transfer moves (existing, with increased sampling).
+   c. Generate (1,1)-swap moves (existing, with increased sampling).
+   d. Generate (1,2)-interchange moves (new).
+   e. Apply best move with tabu/aspiration.
+   f. Update sorted item lists.
+5. Implement adaptive tabu tenure.
+6. Implement improved restart strategy without max_restarts cap.
+7. Use full time budget.
+
+### Expected Impact
+- The (1,2)-interchange is the single biggest expected improvement, as it allows the search to find feasible packings that are unreachable via simple transfers and 1-1 swaps.
+- Better lower bound avoids wasting time.
+- More time (100s vs 36s) allows deeper search.
+- Better initialization and restart strategy improve convergence.
+- Target: reduce ratio from 1.012 to below 1.005.

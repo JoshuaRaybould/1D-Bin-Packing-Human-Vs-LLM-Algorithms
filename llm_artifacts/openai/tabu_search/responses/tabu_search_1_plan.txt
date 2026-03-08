@@ -1,0 +1,215 @@
+### 1) Solution representation upgrades (speed + enabling richer moves)
+**Goal:** make relocate/swap and “remove a bin” operations cheap; avoid `list.remove()` and repeated scanning.
+
+1.1 **Store bins as arrays + positions:**
+- Maintain:
+  - `bins: List[List[int]]` item ids per bin (keep, but treat as dynamic arrays).
+  - `pos_in_bin: List[int]` where `pos_in_bin[i]` is index of item `i` in `bins[assign[i]]`.
+  - `assign: List[int]` as now.
+  - `loads: List[int]` as now.
+- Implement O(1) removal by swap-pop:
+  - To remove item `i` from bin `b`, swap it with last item in `bins[b]`, update that other item’s `pos_in_bin`, then pop.
+  - Append on insert; set `pos_in_bin[i]` accordingly.
+
+1.2 **Keep a running slack penalty**
+- Maintain `slack_sq_sum = sum((C-loads[b])^2)` for current solution.
+- Update it incrementally for each move by subtracting old terms and adding new terms for affected bins. This avoids recomputing secondary objective each iteration.
+
+1.3 **Bin index stability policy**
+- Frequent `cleanup_empty()` reindexing invalidates tabu keys based on bin ids.
+- Change empty-bin handling:
+  - When a bin becomes empty, *swap it with last bin* and pop, updating assignments of items in the swapped bin. This preserves compact indices with minimal reindexing work.
+  - Tabu keys that reference bin indices remain valid except for swapped bin; handle by updating tabu entries referencing the moved last-bin index (see 4.4) or use bin “IDs” (preferred).
+
+1.4 **Introduce persistent bin IDs** (recommended)
+- Each bin has a unique immutable `bin_id` stored in parallel list `bin_ids`.
+- Tabu relocation keys become `(item, dest_bin_id)` and “forbid return” keys become `(item, source_bin_id)`.
+- When bins are swapped/popped, only arrays reorder; tabu remains consistent.
+
+
+### 2) Objective and acceptance: prioritize bin reductions more aggressively
+**Goal:** stop spending effort micro-optimizing slack when bins can be reduced; guide search toward configurations that enable emptying.
+
+2.1 **Lexicographic objective (standard for BP TS)**
+- Use `(num_bins, slack_sq_sum)` as a lexicographic pair rather than `BIG` scalarization.
+- Comparisons:
+  - A move is better if it reduces `num_bins`; if tied, reduce `slack_sq_sum`.
+- Keep `best` by lexicographic ordering.
+
+2.2 **Add a targeted “emptiable-bin score” (only for move ranking, not best tracking)**
+- For evaluating moves when `num_bins` unchanged, prefer moves that reduce the load of one of the lightest bins (because emptying it yields a bin reduction).
+- Define `emptiness_potential[b] = loads[b]` (smaller is better).
+- When comparing equal `(num_bins, slack_sq_sum)` deltas (or near-equal), break ties by:
+  - prefer moves where `b_from` is among the `k` lightest bins;
+  - prefer moves that decrease `loads[b_from]` or increase fill of other bins.
+- This is still tabu search; it’s a candidate-list evaluation heuristic.
+
+
+### 3) Neighborhood redesign: candidate lists that target bin elimination
+**Goal:** evaluate fewer useless moves and more moves that can lead to bin elimination.
+
+3.1 **Deterministic candidate bin set per iteration**
+- Always pick a small set of target bins `T` = `k_light` lightest bins (e.g., 10–30 depending on n) as *sources*.
+- Pick a set of destination bins `D` = bins sorted by remaining capacity (or by load), plus a few random bins for diversification.
+
+3.2 **Relocate evaluation: use best-fit destinations efficiently**
+- For each item in source bins `T`, instead of trying many random destinations:
+  - Consider only top `r` destination bins that best-fit the item (smallest remaining capacity after placement) among `D`.
+- Implementation detail: since we cannot maintain a balanced tree easily in Python, do:
+  - Precompute list of destination bins with their current remaining capacity `rem[b]=C-loads[b]`.
+  - For each item weight `w`, scan `D` (size ~30–80) to find best `r` feasible.
+
+3.3 **Swap evaluation: targeted complementary swaps**
+- Current swap sampling is mostly random.
+- Improve by selecting `i` from a light bin in `T` and choosing candidate `j` from bins where it would help feasibility/fill:
+  - Candidate `j` should have weight close to `w_i + rem[bi]` (so swapping increases load of light bin or enables relocating another item).
+- Practical method:
+  - Maintain items in each bin; sample `j` from bins with high load (tight bins) and from bins with large remaining capacity.
+  - Do limited trials per `i` (e.g., 5–10) rather than global random.
+
+3.4 **Add a standard TS extension: short ejection chains to empty a bin**
+This is the single most important algorithmic improvement for reducing bin count.
+
+- When a bin `b0` is selected as “target to empty”, try to move all its items out using a chain of 2–4 relocations where later moves “eject” an item from a destination bin to make room.
+- Typical depth-2 chain:
+  - Move item `a` from `b0` to `b1` (requires space).
+  - If no space, pick item `x` from `b1` to move to `b2` (or swap) to create space, then move `a`.
+- Keep chain depth small (2 or 3) to keep evaluation manageable.
+
+Implementation plan for chain search per iteration:
+- Pick `b0` among the few lightest bins.
+- Let `items0` be its items sorted by decreasing weight (hardest first).
+- Attempt to place each `a` using:
+  1) direct relocate to best-fit bin;
+  2) if not possible, try depth-2 ejection:
+     - choose candidate `b1` where `a` almost fits (small deficit),
+     - choose an item `x` in `b1` with weight >= deficit,
+     - try relocate `x` to some `b2` (best-fit), then relocate `a` to `b1`.
+- If all items of `b0` can be moved, bin is eliminated.
+
+Tabu integration:
+- Treat the whole chain as one composite move for selection.
+- When applied, add tabu entries for each atomic relocate in the chain (item, old_bin_id) to avoid immediate undo.
+- Aspiration: allow tabu if it improves best `(num_bins, slack)`.
+
+3.5 **Neighborhood size budgeting**
+- Per iteration, evaluate:
+  - `O(k_light * items_per_bin * r)` relocates (small, focused)
+  - `O(k_light * swap_trials_per_item)` swaps
+  - plus occasional chain attempt when stagnating or periodically (see section 6)
+- This increases “useful move density” and should reduce wasted 40s.
+
+
+### 4) Tabu mechanism improvements (tenure, aspiration, memory)
+**Goal:** stabilize search, reduce cycling, and diversify more effectively.
+
+4.1 **Adaptive tenure (reactive tabu search style)**
+- Start with `tenure = int(5 + 0.7*sqrt(n))`.
+- Track repetition/cycling indicator:
+  - e.g., maintain a hash/signature of solution (see 5.3) in a small deque; if repeats occur frequently, increase tenure; otherwise slowly decrease toward a floor.
+- Tenure range: `[min_tenure, max_tenure]` e.g. `[5, 40]`.
+
+4.2 **Use move-based tabu that matches operators**
+- Relocate tabu: `(item, dest_bin_id)` or more effective: forbid returning `(item, source_bin_id)` (as you do) **and** optionally forbid immediate move to the last destination.
+- Swap tabu: store `(item_i, item_j)` as now, but also consider `(item, bin_id)` restrictions for both items post-swap to prevent immediate reversal.
+
+4.3 **Aspiration criteria upgrade**
+- Current aspiration only if `cand_obj < best_obj`.
+- Make aspiration lexicographic:
+  - allow tabu if candidate reduces `num_bins` vs global best, OR equals bins and improves slack.
+- Additionally, allow tabu if it produces a new best for current `num_bins` level (record `best_slack_for_m[m]`).
+
+4.4 **Tabu dictionary maintenance without heavy rebuilds**
+- Instead of purging by rebuilding dict comprehensions (costly), store expiry and occasionally delete a bounded number of expired entries by iterating keys list in chunks, or just let dict grow but cap size:
+  - If dict size exceeds threshold, purge expired.
+
+
+### 5) Intensification and diversification (standard TS components)
+**Goal:** avoid long stagnation; intensify around good structures; diversify when stuck.
+
+5.1 **Elite solution pool**
+- Keep a small pool (e.g., 5–10) of best solutions found (by `(bins, slack)`), with diversity measured by Hamming distance of item-to-bin assignment (approximate).
+- Periodically restart from an elite solution with modifications (this is still within TS practice: strategic restarts / intensification).
+
+5.2 **Frequency-based diversification (long-term memory)**
+- Maintain `move_freq_item_bin[item][bin]` is too big; instead:
+  - `item_move_count[item]` increments when item moved.
+  - `bin_used_count[bin_id]` counts how often bin_id has been used as destination.
+- During stagnation, bias candidate selection toward rarely moved items / rarely used bins to explore.
+
+5.3 **Stagnation detection**
+- Track `iters_since_best`.
+- If `iters_since_best > threshold` (e.g., 500–2000 depending on n), trigger one of:
+  - a chain-empty attempt on lightest bin;
+  - a structured perturbation (see 5.4);
+  - restart from elite.
+
+5.4 **Structured perturbation (still TS-consistent)**
+- Replace the current “mild random swap” with a more purposeful perturbation:
+  - Select 1–3 lightest bins, remove their items, and reinsert them using a randomized best-fit (RBF) order.
+  - This is a standard large step in TS for packing (strategic oscillation / shake).
+- Keep feasibility always.
+- After perturbation, continue TS with tabu reset partially (clear short-term tabu, keep long-term stats).
+
+
+### 6) Time/iteration budgeting to use up to 100 seconds
+**Goal:** stronger solutions; still obey “fixed iteration count” + time checks.
+
+6.1 **Increase `max_iter` substantially**
+- Set `max_iter` based on n, e.g. `max_iter = max(20000, 400*n)` (tune).
+- Add time checks every iteration (cheap) or every few iterations.
+- Because execution can run up to 100 seconds, plan so typical instances continue improving after 40s.
+
+6.2 **Two-phase schedule within the single run**
+- Phase A (0–30% iterations): intensification
+  - focus on light-bin emptying, smaller randomness.
+- Phase B (30–100%): diversification cycles
+  - periodic perturbation/restart when stagnating.
+- Implement via iteration counters, not additional parameters.
+
+
+### 7) Initialization improvements (still heuristic, but important baseline)
+**Goal:** start closer to good regions; reduce early wasted search.
+
+7.1 **Multi-start constructive initialization (within solve, no extra args)**
+- Build several initial packings quickly (e.g., 5–20 depending on n and time_limit):
+  - FFD (current)
+  - BFD (best-fit decreasing)
+  - randomized DFF: take groups of equal weights shuffled; or add small random noise to sorting key.
+- Pick the best initial by `(bins, slack)` and seed TS from it.
+
+7.2 **Post-construction tightening**
+- Run a brief deterministic improvement loop (still within TS family if viewed as initial local improvement):
+  - Attempt to empty the lightest bin using greedy relocations before starting TS iterations.
+  - Do not spend more than a small fixed effort budget.
+
+
+### 8) Correctness and packing output constraints
+- Ensure `packing` uses original item indices.
+- Ensure no item duplication or loss:
+  - Maintain invariant: each item in exactly one bin; verify only in debug comments (no heavy runtime checks).
+- Compute `bin_weights` from maintained `loads` for speed; final recompute only once for safety.
+
+
+### 9) Concrete implementation steps checklist (implementation-ready)
+1. Refactor data structures: add `pos_in_bin`, `bin_ids`, incremental `slack_sq_sum`.
+2. Replace `apply_reloc`/`apply_swap` with O(1) swap-pop operations updating `pos_in_bin`.
+3. Replace scalar `objective()` with lexicographic comparisons using `(m, slack_sq_sum)`.
+4. Implement candidate list selection each iteration:
+   - `T = k_light` bins by load.
+   - `D = k_dest` bins by remaining capacity / load + few random.
+5. Implement relocate evaluation using best-fit among `D` (top r) with tabu + aspiration.
+6. Implement targeted swap evaluation anchored on items from `T`.
+7. Implement composite “ejection chain” move generator (depth 2–3) invoked:
+   - every `p` iterations (e.g., 50–200), and/or when `iters_since_best` exceeds threshold.
+8. Implement adaptive tenure and improved tabu housekeeping.
+9. Add elite pool + restart/perturbation policy when stagnating.
+10. Increase `max_iter` and add periodic time checks; on time exceed, return best.
+
+
+### 10) Expected impact on the reported metrics
+- The largest reductions in average ratio should come from:
+  - Explicit empty-bin targeting + ejection chains (more actual bin count drops).
+  - Better candidate lists (more productive evaluations per second).
+  - Diversification via structured perturbation and elite restarts (fewer long plateaus).
+- Runtime will remain bounded by fixed iterations and time checks, but should use the available budget more effectively and can continue improving up to 100 seconds when allowed.

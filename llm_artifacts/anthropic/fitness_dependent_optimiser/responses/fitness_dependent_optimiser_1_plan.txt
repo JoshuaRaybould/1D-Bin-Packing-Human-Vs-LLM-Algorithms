@@ -1,0 +1,110 @@
+## Detailed Implementation Plan
+
+### 1. Improved Fitness Function (Critical)
+**Current weakness**: Fitness is simply `-num_bins`, giving no gradient information. Two solutions with the same bin count are considered equal even if one is much more tightly packed.
+
+**Change**: Use a continuous fitness function that combines bin count with packing quality:
+```
+fitness = -num_bins + sum((bin_weight[b] / bin_capacity)^2 for all bins b) / num_bins
+```
+This Falkenauer-style fitness rewards fuller bins, giving the optimizer gradient information to distinguish solutions with the same bin count but different packing tightness. The squared term strongly rewards nearly-full bins.
+
+### 2. Single High-Quality Decoder (Performance)
+**Current weakness**: Running both FF and BF decoders doubles evaluation cost.
+
+**Change**: Use only Best Fit Decreasing (BFD) as the decoder. BFD is generally superior for bin packing. The priority vector determines item ordering; BFD places each item in the bin with the least remaining space that still fits the item. Remove `decode_first_fit` and the dual-decode `decode` wrapper.
+
+### 3. Optimized Decoder Implementation (Speed)
+**Current weakness**: Linear scan through all bins for each item placement is O(n*B).
+
+**Change**: Maintain a sorted list of (remaining_capacity, bin_index) pairs. For Best Fit, we need the bin with smallest remaining capacity >= item weight. Use `bisect` module to binary search for the insertion point in a sorted list of remaining capacities. After placing an item, remove the old capacity and insert the new one. This reduces per-item placement from O(B) to O(log B). Implementation:
+- Keep a sorted list of remaining capacities alongside bin indices
+- Use `bisect_left` to find the first bin with remaining capacity >= weight
+- Among candidates, pick the one with smallest remaining (leftmost in sorted order that fits)
+- Remove old entry, insert new entry using bisect
+
+### 4. Random-Key Encoding with Normalization (Representation)
+**Current weakness**: Priority values drift unboundedly, making FDO movements increasingly meaningless.
+
+**Change**: After each FDO update, normalize priority vectors to [0, 1] range by rank-based normalization: sort the priorities, then replace each value with its rank divided by n. This keeps the search space bounded and ensures FDO movements have consistent magnitude effects on the permutation.
+
+### 5. Better Population Initialization (Diversity)
+**Current weakness**: Only FFD + Gaussian perturbations of FFD.
+
+**Change**: Initialize population with diverse strategies:
+- 1 solution: FFD ordering (weight descending)
+- 1 solution: Weight ascending (sometimes finds different structure)
+- 1 solution: Random shuffle of items sized > capacity/3 first, then rest by weight
+- 2 solutions: Group items by size classes (large > C/2, medium > C/3, small) with different internal orderings
+- Remaining: Random permutations encoded as random keys in [0,1]
+
+This ensures diverse starting points covering different regions of the search space.
+
+### 6. Proper FDO Update Equations (Algorithm)
+**Current weakness**: The FDO update rules are loosely implemented and may not match the original algorithm's dynamics.
+
+**Change**: Implement the FDO update more carefully:
+- Compute `weight_factor = wf_max - (wf_max - wf_min) * (iter / max_iter)`
+- For each agent i (not the best):
+  - Compute `pace_i = wf * |f_i - f_best|` (fitness difference drives step size)
+  - If `f_i > median(fitnesses)` (above-median fitness):
+    - Move toward best: `x_new[d] = x_best[d] + pace_i * random.uniform(-1, 1)` (exploitation)
+  - Else:
+    - Pick random agent r: `x_new[d] = x_r[d] + pace_i * random.uniform(-1, 1)` (exploration)
+- For the best agent: small random perturbation `x_new[d] = x[d] + random.gauss(0, 0.05)`
+- Apply rank-normalization after update
+
+The pace should be scaled relative to the [0,1] encoding range. Use `pace = wf * abs(f_i - f_best) / max(abs(f_worst - f_best), 1e-10)` to normalize pace to [0, wf].
+
+### 7. Reduced Population Size (Speed)
+**Current weakness**: Population of up to 50 with expensive evaluations limits generations.
+
+**Change**: Use population size of `min(30, max(8, n // 5))`. Smaller population = more generations = better convergence within time budget.
+
+### 8. Precompute Median Once Per Generation (Speed)
+**Current weakness**: Median is computed inside the inner loop (per agent).
+
+**Change**: Compute `median_fitness = sorted(fitnesses)[pop_size // 2]` once at the start of each generation, outside the per-agent loop.
+
+### 9. Stronger Reinitialization Strategy (Diversity Maintenance)
+**Current weakness**: Reinitializing worst agents every 20 iterations with Gaussian perturbation of best.
+
+**Change**: Every 30 iterations:
+- Replace bottom 20% of population
+- Half of replacements: perturbations of global best with varying noise scales (0.1 to 0.5)
+- Other half: completely random permutations (random keys in [0,1])
+- This maintains diversity while also exploiting the best found solution
+
+### 10. Tighter Lower Bound (Early Termination)
+**Current weakness**: Only uses the trivial continuous lower bound L1 = ceil(sum(weights)/capacity).
+
+**Change**: Implement L2 lower bound:
+- Count items with weight > C/2 (call this count n_large)
+- Among remaining items (weight <= C/2), compute total weight that cannot pair with large items
+- L2 = n_large + ceil(remaining_unpaired_weight / C)
+- Use `max(L1, L2)` as lower bound for early termination
+
+### 11. Time Management (Efficiency)
+**Current weakness**: Checks time every agent evaluation.
+
+**Change**: Check time only every 5 agents or once per generation (whichever is more appropriate given problem size). For small n, check per generation; for large n, check every few agents. This reduces `time.time()` overhead.
+
+### 12. Skip Oversized Items Early (Correctness/Speed)
+**Current weakness**: Items exceeding bin capacity are skipped during decode but still occupy dimensions in the priority vector.
+
+**Change**: Pre-filter items that exceed bin capacity at the start. Track their indices separately and exclude them from the optimization entirely. Add them back as empty entries in the final packing output.
+
+### Implementation Order
+1. Pre-filtering of oversized items
+2. New fitness function (Falkenauer-style)
+3. Single BFD decoder with bisect optimization
+4. Random-key encoding with rank normalization
+5. Diverse population initialization
+6. Proper FDO update equations with normalized pace
+7. Reduced population size
+8. Pre-computed median per generation
+9. Improved reinitialization strategy
+10. Tighter L2 lower bound
+11. Optimized time checking
+
+These changes together should significantly reduce the ratio by: (a) evaluating many more solutions per second through faster decoding, (b) providing better gradient information through continuous fitness, (c) exploring the search space more effectively through proper FDO dynamics and diverse initialization, and (d) terminating earlier when optimal solutions are found via tighter bounds.

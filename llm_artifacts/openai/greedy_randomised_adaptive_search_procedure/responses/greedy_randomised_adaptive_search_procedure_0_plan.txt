@@ -1,0 +1,236 @@
+## 0) High-level goals
+1. **Use the full available runtime**: run until `time_limit` (and you can safely exceed to 100s overall cap externally) with periodic checks.
+2. **Improve best-bin objective (bin count)** first, then tie-break by tighter packing.
+3. Keep **GRASP as the primary method**; enhancements must be standard GRASP components: stronger greedy randomized construction, stronger local search, and **elite set + path relinking** (widely used GRASP intensification).
+
+---
+
+## 1) Baseline correctness + instrumentation adjustments
+### 1.1 Ensure feasibility fast
+- Pre-check: if any `weights[i] > bin_capacity`, decide policy (either place alone and still infeasible, or raise). Usually benchmarks ensure feasible; still add a lightweight guard.
+
+### 1.2 Use time budget properly
+- Remove/raise the small `max_iter` cap. Replace with:
+  - `max_iter = very_large_number` (e.g., 10**9) and rely on time checks.
+  - Still satisfy the “fixed number of iterations of your choosing” requirement by implementing: `for it in range(MAX_ITER):` with MAX_ITER large (e.g., 1_000_000) and break on time.
+- Add **coarse periodic time checks** to reduce overhead:
+  - Check time every K item insertions in construction and every K move attempts in local search.
+
+### 1.3 Improve solution comparison
+- Primary: fewer bins.
+- Secondary: maximize sum of squared fills is okay.
+- Add tertiary: maximize minimum fill (or minimize sum of slack) to prefer globally tighter packings.
+- Keep comparison cheap; precompute metrics once per solution.
+
+---
+
+## 2) Stronger GRASP construction (main quality lever)
+Your current construction is basically Best-Fit Decreasing with an RCL over bins by slack-after; it never considers opening a new bin unless forced.
+
+### 2.1 Candidate list should include “open new bin” even when not forced
+Standard GRASP for packing allows choosing to open a bin as part of diversification.
+- Add a “new bin” candidate with score based on expected future impact.
+- Make it occasionally competitive using an **adaptive penalty**:
+  - Score for placing into existing bin: `slack_after` (smaller better)
+  - Score for new bin: `bin_capacity - w + open_penalty`
+  - `open_penalty` starts large (discourage) but decreases when the algorithm stagnates or for very large items.
+- Rule of thumb: allow new-bin candidate into RCL when `w` is large (e.g., `w > 0.7*C`) or when all feasible placements leave large slack.
+
+### 2.2 Use multiple constructive heuristics, not just one
+Cycle or randomly pick among standard constructive scoring rules:
+1. **Best-Fit** (min slack after)
+2. **First-Fit** (fast baseline, sometimes yields different structure)
+3. **Worst-Fit** (for diversification)
+4. **Regret-based** scoring (stronger):
+   - For each item, estimate best and second-best placement slack; prefer placing items with high regret earlier.
+   - In bin packing, a lightweight version is: when placing an item, prefer bins where it “fits tightly” *and* avoid consuming rare slack ranges.
+Implementation-ready approach (still O(#bins) per item):
+- Maintain bins’ remaining capacities.
+- For a given item w, compute the best and second-best `slack_after` among feasible bins; define `regret = second_best - best` (if second exists else large).
+- Use this regret as an additional signal to decide whether to open a new bin or to force tight placement.
+
+### 2.3 Build RCL based on *value*, not just slack range
+Current threshold `best + alpha*(worst-best)` is sensitive to outliers.
+- Use **top-k RCL** primarily (k based on sqrt(#bins) or a fixed small number like 20–50), plus an alpha threshold as fallback.
+- Recommendation:
+  - Sort candidates by score; take `k = min(25, len(candidates))` then randomly choose among the best `ceil(alpha*k)` (where alpha in [0.1..0.5])
+  - This yields stable diversification.
+
+### 2.4 Adaptive alpha schedule
+Instead of fixed cycling, adapt to progress:
+- Maintain `no_improve_iters`.
+- If improving frequently: lower alpha (more greedy).
+- If stagnating: raise alpha and allow “new bin” candidate more often.
+Example schedule:
+- Start alpha ~0.15
+- If no improvement for 200 iterations: alpha = min(0.6, alpha + 0.1)
+- If improvement: alpha = max(0.05, alpha * 0.9)
+
+### 2.5 Speed: data structures for construction
+- Keep `remaining[b] = bin_capacity - bin_w[b]` and update.
+- Avoid storing `packing` as lists of indices during construction if not necessary for scoring; but you need final packing. Still, maintain packing lists.
+- Consider keeping bins in buckets by remaining capacity (integer capacities) if capacities are small; otherwise skip.
+
+---
+
+## 3) Replace local search with a stronger *standard GRASP* local search for bin packing
+Your current local search only attempts to empty one bin by greedy relocation. This misses many improvements requiring small swaps.
+
+### 3.1 Use a two-level local search: (A) bin elimination, (B) exchanges
+Keep bin elimination as the primary objective because it directly reduces bin count.
+
+#### 3.1.A Enhanced bin elimination (multi-try + ordering)
+For a target bin `b`:
+- Try multiple randomized orders of its items (not just one). E.g., 5–20 tries depending on time.
+- Use different insertion heuristics when relocating: best-fit, first-fit, and “least future harm” (prefer bins whose remaining capacity after insertion is common).
+- Start with bins ordered by **increasing load** and also by **hardness** (bins containing large items first).
+
+#### 3.1.B Add 1-1 and 2-1 exchanges (classic neighborhoods)
+These are standard for bin packing local improvement and often enable later bin elimination.
+- **1–1 swap**: swap item i in bin A with item j in bin B if both bins remain feasible and improves a metric (e.g., reduces total slack variance or makes one bin easier to empty).
+- **2–1 move**: move two items from A into B while moving one item back (or into a third bin) to maintain feasibility.
+Implementation approach:
+- Maintain for each bin its remaining capacity and a list of items.
+- Limit search by:
+  - Only consider bins among the worst K (largest slack) and best K (tight bins).
+  - For each bin, consider only its largest L items.
+  - Use random sampling to keep runtime bounded.
+Acceptance criteria:
+- Accept any move that reduces bin count immediately.
+- Otherwise accept moves that improve secondary objective (sum of squared fills) with a small probability (simulated annealing–like) **only if you consider it still “local search”**; if you want to stay strictly deterministic, just accept improving moves.
+
+### 3.2 Avoid expensive rollback using “trial packing”
+Current rollback uses `list.remove`, which is O(m) and repeated.
+Implementation-ready improvement:
+- When attempting to empty bin b:
+  - Do **not** mutate global state per item.
+  - Instead compute a plan: for each item, pick destination bin and update temporary `tmp_remaining` array.
+  - If the plan succeeds, then apply moves once.
+This removes rollback complexity and speeds up attempts.
+
+### 3.3 Maintain an item->bin index map
+- Keep `where[item] = bin_index` updated.
+- This makes swaps/moves much cheaper and enables quick feasibility checks.
+- When a bin is removed, update indices for affected bins (or use lazy “bin ids” with an indirection table).
+
+### 3.4 Local search schedule per iteration
+To balance breadth vs depth:
+- Early iterations: short local search (1–2 passes).
+- When a new best is found: intensify (more passes, more empty-bin attempts, enable exchanges).
+- Under stagnation: intensify on elite solutions (see below).
+
+---
+
+## 4) Add Elite Set + Path Relinking (standard GRASP intensification)
+This is the single most impactful GRASP extension for packing given long time budgets.
+
+### 4.1 Maintain an elite set of size E
+- Store top E solutions by the `better()` criterion, but enforce **diversity**.
+- Diversity measure (cheap): signature of multiset of bin loads (sorted), or hash of normalized remaining capacities.
+- Only add a new solution if:
+  - It is better than the worst elite, or
+  - It is sufficiently different (distance > threshold) and near-best.
+Suggested E: 10–25.
+
+### 4.2 Path relinking between current solution and an elite solution
+For bin packing, represent a solution as assignment of each item to a bin (with bin relabeling issue).
+Implementation-ready approach:
+1. Pick an elite solution `S_e` and current solution `S_c`.
+2. Define a **guided move**: choose an item that is assigned to a different “type of bin” and move it toward the elite placement.
+3. Because bin labels differ, align bins by greedy matching on bin loads / remaining capacities:
+   - Sort bins in each solution by load descending; pair them by position (approximate alignment).
+4. Then, for items in `S_c`, if item is in bin k but in `S_e` it is in bin k’, attempt to move it to bin k’ (or the closest feasible bin among the paired bins).
+5. After each batch of guided moves (e.g., 5–20), run local search.
+6. Track the best intermediate solution along the path.
+
+Keep it bounded:
+- Do path relinking only:
+  - when you find a new incumbent, or
+  - every T iterations (e.g., every 50–100 iterations), or
+  - during stagnation.
+
+### 4.3 Use both directions
+- Forward: start from current to elite.
+- Backward: start from elite to current.
+Take best result.
+
+---
+
+## 5) Diversification and restart logic
+GRASP naturally restarts each iteration, but you can do smarter diversification:
+
+### 5.1 Weight-order perturbations beyond tiny random noise
+- Use a “restricted shuffle” within equal-weight groups or within windows of size W in the sorted list.
+- Or sample from a biased distribution: mostly heavy-first but occasionally pick next item among top-K remaining.
+This is classic GRASP item-RCL construction (RCL over items, not just bins):
+- Maintain remaining items sorted by weight.
+- At each step pick next item from top `k_items` (e.g., 10–30) randomly.
+This increases structural diversity significantly.
+
+### 5.2 Stagnation-driven intensification
+If no improvement for X seconds/iterations:
+- Increase alpha
+- Increase probability of opening new bins during construction
+- Trigger path relinking more often
+- Intensify local search depth on elite solutions
+
+---
+
+## 6) Lower bound awareness (for stopping / targeting)
+You already compare to a best-known LB externally; internally you can compute cheap LBs:
+- `LB1 = ceil(sum(weights)/C)`
+- `LB2` from counting large items: for each threshold (C/2, C/3, …) but keep it cheap.
+Use it for:
+- Early exit if `bins == LB1` (or max(LB1, LB2)).
+- Focus local search: if you are within 1 bin of LB, intensify.
+
+---
+
+## 7) Concrete iteration structure (implementation-ready)
+Per iteration:
+1. **Construction**:
+   - Choose construction mode (best-fit / regret / etc.) based on adaptive probabilities.
+   - Use item-RCL (top-k items) + bin-RCL (top-k bins) + occasional new-bin option.
+2. **Local search**:
+   - Phase A: enhanced bin elimination attempts on a subset of light bins.
+   - Phase B: limited swaps/exchanges to unlock further eliminations.
+3. **Update incumbent** and elite set.
+4. If conditions met, do **path relinking** with 1–3 random elite solutions; local search after each relinking.
+5. Periodically (every e.g. 200 iterations), run a short intensification starting from the current best.
+
+Time checks:
+- At least once per iteration.
+- Additionally every fixed number of operations inside local search / relinking.
+
+---
+
+## 8) Practical parameter suggestions (starting points)
+- Elite size E = 15
+- Item-RCL size k_items = min(25, remaining_items)
+- Bin-RCL size k_bins = min(25, feasible_bins)
+- Local search:
+  - Empty-bin tries per target bin: 5 (normal), 15 (intensify)
+  - Swap sampling: pick 20 random bin pairs among top slack bins; check up to 10 item pairs each
+- Path relinking frequency:
+  - Every 50 iterations, or on each new best
+  - Path length cap: 200 guided item moves total
+
+---
+
+## 9) Expected impact vs current weaknesses
+- **Allowing “open new bin” sometimes** prevents early over-commitment that creates hard-to-repair slack patterns.
+- **Item-RCL** creates much more diverse packings than just tiny noise in sorting.
+- **Stronger local search (exchanges + multi-try elimination)** directly targets bin reduction beyond what greedy relocation can do.
+- **Elite set + path relinking** uses the large time budget to intensify around high-quality regions (this is usually where GRASP gains most when you have tens of seconds).
+- **Removing low max_iter** ensures you actually exploit available runtime, which your current run does not fully (and you’re allowed to run longer anyway).
+
+---
+
+## 10) Validation checklist for the final implementation
+- Always maintain alignment: `bin_weights[b] == sum(weights[i] for i in packing[b])` after applied moves.
+- Ensure every item appears exactly once.
+- Ensure each bin weight <= capacity.
+- Ensure periodic time checks return best-so-far immediately.
+- Ensure randomness only via `random` module and no seeding.
+
+This plan keeps GRASP as the primary algorithm, strengthens both its construction and its (standard) local search, and adds standard GRASP intensification (elite set + path relinking) to materially reduce the average ratio within the available time.

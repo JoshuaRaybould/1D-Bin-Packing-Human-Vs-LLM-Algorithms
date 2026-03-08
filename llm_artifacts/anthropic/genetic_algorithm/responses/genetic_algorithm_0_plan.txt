@@ -1,0 +1,133 @@
+## Detailed Implementation Plan
+
+### 1. Optimize Best Fit Decode with `bisect` Module
+
+**Why:** The decode function is called for every fitness evaluation and is the main bottleneck. Currently O(n*m) with Python-level loops. Using `bisect` module moves the hot inner loop to C.
+
+**How:**
+- Import `bisect` (standard library)
+- Maintain a sorted list of `(remaining_capacity, bin_index)` tuples
+- For each item with weight `w`:
+  - Use `bisect.bisect_left(sorted_remaining, w)` to find the first bin with remaining ≥ w (this is the best fit since it's the tightest)
+  - If found: pop that element, compute new remaining, re-insert with `bisect.insort`
+  - If not found: create a new bin
+- This gives O(log m) search per item (vs O(m) Python loop), with O(m) C-level list operations for insert/remove
+- Keep `bin_items` as a parallel list indexed by bin_index
+
+### 2. Implement Bin-Based Crossover (BBX)
+
+**Why:** Standard OX/PMX don't preserve good bin groupings. BBX is the standard crossover for bin-packing GAs and dramatically improves solution quality.
+
+**How:**
+- Decode parent1 into bins using best-fit
+- Score each bin by fullness ratio: `sum(weights in bin) / bin_capacity`
+- Select bins with fullness ratio above a threshold (e.g., 0.8 or top 50% of bins) randomly
+- Mark all items in selected bins as "placed"
+- Collect unplaced items in the order they appear in parent2's permutation
+- The child permutation is: items from selected bins (in their bin order) followed by unplaced items (in parent2's order)
+- Evaluate using the standard best-fit decode
+
+### 3. Improve Initial Population
+
+**Why:** Better starting solutions lead to faster convergence.
+
+**How:**
+- Slot 0: FFD (sort by decreasing weight) — already present
+- Slots 1-3: Perturbed FFD with small swaps (only among items of similar weight)
+- Slots 4-6: Random restarts of FFD where items within each weight class (e.g., >C/2, C/3–C/2, <C/3) are shuffled
+- Slots 7+: Mix of random permutations and partially-sorted permutations
+- For each generated permutation, also try the reverse and keep the better one
+
+### 4. Tighter Lower Bound (L2 / Martello-Toth)
+
+**Why:** Better lower bound enables earlier termination when optimal is reached.
+
+**How:**
+- Implement the L2 bound: for a threshold α from 1 to C/2:
+  - Count items with weight > C - α (must each have own bin or share with small items)
+  - Count items with weight in (C/2, C-α] 
+  - Count items with weight in [α, C/2]
+  - Compute bound using the formula: L2(α) = |large| + max(0, ceil((sum of medium weights - remaining space in large bins) / C))
+  - Take max over several values of α
+- Cache this computation (done once at start)
+
+### 5. Adaptive Genetic Algorithm Parameters
+
+**Why:** Fixed parameters don't adapt to problem difficulty or convergence state.
+
+**How:**
+- Track diversity metric: number of distinct fitness values in population
+- If diversity drops below threshold (e.g., <30% unique fitness values): increase mutation rate to 0.6, increase number of swaps in swap mutation
+- If diversity is healthy: use standard mutation rate 0.3
+- Periodically (every 50 generations) inject fresh random individuals to replace worst 10% of population
+- Increase tournament size from 3 to 5 when population is diverse (stronger selection pressure)
+
+### 6. Improved Mutation Operators
+
+**Why:** Current mutations are generic; bin-packing-aware mutations can be more effective.
+
+**How:**
+- **Swap mutation**: Keep as-is but with adaptive number of swaps (1 to n//10)
+- **Inversion mutation**: Keep as-is
+- **Block move mutation**: Select a random contiguous block and move it to a random new position in the permutation. This is more disruptive than inversion but preserves relative order of items outside the block.
+- Adjust probabilities: 30% swap, 25% inversion, 25% block move, 20% scramble
+
+### 7. Time Management Improvements
+
+**Why:** Currently using only 85% of time budget. Should use ~97%.
+
+**How:**
+- Change time check threshold from 0.85 to 0.97
+- Check time every 5 generations (not every generation) to reduce `time.time()` overhead
+- Also check time inside offspring generation loop but only every 5 offspring
+- Use the full time budget since there's no penalty for longer runtime
+
+### 8. Population Size Tuning
+
+**Why:** Need to balance between diversity and number of generations.
+
+**How:**
+- For small instances (n < 50): pop_size = 50, many generations
+- For medium instances (50 ≤ n < 200): pop_size = 80
+- For large instances (n ≥ 200): pop_size = 40 (fewer individuals, more generations since each evaluation is expensive)
+
+### 9. Duplicate Elimination
+
+**Why:** Duplicates waste population slots without adding diversity.
+
+**How:**
+- Before adding a child to the new population, check if its fitness matches any elite individual AND if the permutation is identical (checking fitness is cheap; skip permutation check)
+- Actually, just check fitness: if the child has the same fitness as an existing member, apply an additional mutation with 50% probability
+- This is a lightweight approximation that avoids expensive permutation comparison
+
+### 10. Implementation Order and Structure
+
+```
+solve():
+  1. Handle edge cases (n=0, n=1)
+  2. Compute weights, total_weight, basic lower bound, L2 lower bound
+  3. Define optimized decode_best_fit using bisect
+  4. Define evaluate, format_solution
+  5. Generate initial population (FFD + variants + random)
+  6. Main GA loop:
+     a. Sort by fitness, apply elitism
+     b. Generate offspring using BBX crossover (70%) or OX crossover (30%)
+     c. Apply mutation with adaptive rate
+     d. Evaluate offspring
+     e. Update best solution
+     f. Every 50 generations: diversity check and injection
+     g. Every 5 generations: time check
+     h. Early termination if best_fitness == lower_bound
+  7. Return format_solution(best_perm)
+```
+
+### Expected Impact
+
+- **bisect-based decode**: ~2-5x speedup → more generations in same time
+- **BBX crossover**: Better preservation of good bin groupings → faster convergence to better solutions
+- **L2 bound**: More instances terminate early at optimal → better average ratio
+- **Better initial population**: Start closer to optimal → less search needed
+- **Time management (97% vs 85%)**: ~14% more search time
+- **Adaptive parameters + diversity**: Avoid premature convergence
+
+Target: reduce average ratio from 1.027 to ~1.01 or better.

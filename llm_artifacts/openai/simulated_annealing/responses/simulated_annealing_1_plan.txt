@@ -1,0 +1,157 @@
+Implementation-ready plan (no code)
+
+A. Data structures to enable stronger neighborhoods fast
+1) Keep current core representation, but add two O(1)/O(log C) helpers:
+   - `rem[b] = C - bw[b]` array updated on every move.
+   - A bucket index of bins by remaining capacity to find feasible destinations quickly:
+     * If C is reasonably small (common in benchmarks), create `buckets[r] -> list of bin ids with rem=r` and maintain bin positions (bin_id -> position in bucket list) for O(1) delete/insert.
+     * If C can be large, use coarse buckets: group remaining capacity into intervals, e.g. size `g = max(1, C//256)` and map `bucket_id = rem//g`. Maintain lists similarly.
+   - This lets you choose target bins with `rem >= wi` by sampling from a few high-probability buckets instead of random k=10 bins.
+
+2) Maintain a “bin priority” sampling structure:
+   - Two dynamic lists of bin ids:
+     * `light_bins` (high remaining capacity) and `tight_bins` (low remaining capacity), updated lazily (rebuild every epoch) to bias moves.
+   - For bin-elimination, also maintain `candidate_victim_bins`: bins with small item counts (1–6) or large slack (easy to move items out). Rebuild periodically.
+
+B. Rework energy/objective to promote bin elimination while allowing temporary uphill moves
+Goal is still bin count minimization, but secondary term should correlate with future bin elimination.
+
+1) Replace current energy:
+   - Current: `E = bins*BIG + total_waste` with HUGE BIG.
+   - Proposed lexicographic but smoother numeric energy:
+     * Primary: `B = len(bw)`.
+     * Secondary: encourage “pack bins tightly” and “create at least one emptiable bin”. Use a convex penalty on remaining capacity:
+       `S = sum( rem[b]^2 )` (or `rem[b]^p` with p in [1.5,2]). Squaring makes large slack bins disproportionately costly, pushing mass into fewer bins.
+     * Optional tertiary: penalize number of non-empty bins with very small load (stragglers): `L = count(bw[b] < 0.2*C)`.
+   - Combine:
+     `E = B * M + S + lambda*L`, where M is large enough that any B decrease dominates typical S changes, but not astronomically large.
+     * Set `M = 10 * C * C` if using S with squares. Rationale: maximum delta in S from a move is O(C^2); M should be ~10× that to preserve bin-priority but still allow SA to cross small B-increase barriers at high T if needed.
+   - This change alone typically improves ability to find bin merges.
+
+2) Track E incrementally for each move (delta in S is local):
+   - When changing two bins, update `S` by subtracting old `rem^2` and adding new `rem^2`.
+   - When opening/closing a bin, update B and S accordingly.
+
+C. Stronger SA neighborhoods (still SA; these are standard SA “moves”)
+Keep relocate and swap, but add two compound moves specifically to empty bins.
+
+1) Improve relocate destination choice
+   - Instead of sampling k random bins, sample bins whose remaining capacity is close to `wi` (best-fit) using the bucket structure:
+     * Choose 2–4 candidate buckets around `rem≈wi` (rem >= wi), sample a few bins from each.
+   - This increases the frequency of feasible and meaningful relocations dramatically.
+
+2) Add “victim bin emptying” move (multi-relocate)
+   - Core idea: select a victim bin v, attempt to move all (or almost all) its items into other bins; if success, bin count drops.
+   - Procedure (attempted as a single SA move with a single accept/reject):
+     a) Pick victim v from `candidate_victim_bins` with bias toward small item count and larger slack.
+     b) For each item i in v (iterate in decreasing weight to place hard items first): find a destination bin using bucket lookup (best-fit among bins excluding v) and temporarily assign.
+     c) If all items placed, v becomes empty -> normalization.
+     d) Compute total dE from the combined changes and accept/reject as one move.
+   - If not all items can be placed, allow a “partial empty” variant with probability at high T:
+     * Move as many as possible, leaving 1 item; this can set up future success.
+   - This is the single most important addition for reducing bins.
+
+3) Add 2-for-1 merge move (bin merge via subset fill)
+   - Pick two bins a (receiver) and b (donor). Try to move a subset of items from b to a (and possibly other bins) to empty b.
+   - Practical heuristic:
+     * Choose donor b from candidates; choose receiver a among bins with rem close to some item(s) in b.
+     * Attempt to pack items of b into existing bins using greedy best-fit (again bucket-based), prioritizing filling large rem bins first.
+   - Accept/reject as one move.
+
+4) Add “swap+relocate” (ejection chain length 2)
+   - Standard SA enhancement: try to move i from b1 to b2; if infeasible, eject j from b2 to some b3, then place i in b2.
+   - Keep chain length 2 to control cost.
+   - This unlocks many otherwise-infeasible relocations and helps empty bins.
+
+5) Adjust move probabilities by temperature/phase
+   - Early/high T: more exploration with compound moves enabled.
+   - Late/low T: focus on victim-emptying and best-fit relocations.
+   - Suggested schedule by normalized progress p = it/max_iters:
+     * p<0.3: relocate 45%, swap 15%, ejection 20%, victim-empty 20%
+     * 0.3–0.8: relocate 35%, swap 10%, ejection 20%, victim-empty 35%
+     * >0.8: relocate 25%, swap 5%, ejection 10%, victim-empty 60%
+
+D. Cooling, reheating, and acceptance-rate control (still fixed iterations)
+Your current per-iteration exponential cooling is blind to actual acceptance; it tends to freeze too early or wander.
+
+1) Switch to epoch-based cooling
+   - Define an epoch length, e.g. `epoch = 2000` iterations (or 500 + 5n capped).
+   - Maintain acceptance count in the epoch.
+   - At epoch end, adjust T based on observed acceptance rate `acc = accepted/epoch`:
+     * Target acceptance ~0.20–0.35.
+     * If acc < 0.12: T *= 1.25 (too cold)
+     * If acc > 0.45: T *= 0.85 (too hot)
+     * Else: T *= 0.95 (gentle cooling)
+   - Clamp to [Tmin, Tmax] where Tmax can be ~T0.
+
+2) Reheating tied to lack of improvement in bin count
+   - Track best bin count `best_B` and iterations since last best_B improvement.
+   - If no bin-count improvement for, say, 5 epochs, do a controlled reheat: `T = min(T0, T*1.8)` and temporarily increase probability of compound moves for 1 epoch.
+   - This is more aligned with the goal than stagnation on any move.
+
+E. Initialization: diversify and start from stronger baselines
+FFD is decent but deterministic and often lands in local structures.
+
+1) Build multiple initial packings quickly, pick best
+   - Within a small init budget (e.g. min(0.5s, 2% of time_limit)), generate 6–12 packings:
+     * FFD (current)
+     * BFD (best-fit decreasing)
+     * Randomized FFD: same decreasing order but random tie-breaking within weight groups; or “shake” order by sorting by weight then adding small random noise.
+     * 2-phase: start with FFD then run a very short SA warmup (few thousand iters) to pick best start.
+   - Choose the packing with smallest bins then smallest secondary score S.
+
+2) Start temperature calibration based on observed dE
+   - During warmup, sample |dE| from attempted moves; set T0 so that median uphill move has ~0.6 acceptance:
+     `T0 = -median_pos_dE / ln(0.6)`.
+   - This is more robust than avg_w.
+
+F. Iteration budgeting to use full time (while meeting “fixed iterations” rule)
+You currently calibrate, then compute a fixed max_iters; good. But you underuse the allowed max 100s and your target is 95% of remaining.
+
+1) Set target to 99% of remaining time and increase time check frequency slightly
+   - Use `target = 0.99 * remaining2`.
+   - Check time every 1024 iters (or 2048 still ok), but also check at epoch boundaries.
+
+2) Raise iteration cap
+   - Increase `max_iters_cap` meaningfully (e.g. 30–50 million) because Python loops can be fast but benchmark instances may vary; time limit will stop you anyway.
+
+G. Correctness and packing integrity safeguards
+Compound moves increase risk of inconsistency.
+
+1) Centralize “apply move” helpers
+   - Implement internal helpers to:
+     * move item i from bin a to bin b
+     * open new bin with item
+     * close empty bin via normalize
+     * update rem, buckets, item_bin
+     * update energy components (B,S,L)
+   - For compound moves, apply changes to temporary lists first or record a reversible change log.
+
+2) Lightweight periodic validation (optional, low frequency)
+   - Every ~50k iterations (or per 1–2 seconds), validate:
+     * each item appears exactly once
+     * bw matches sum(weights)
+     * bw[b] <= C
+   - If validation fails (bug), revert to best solution and continue; in contest settings you can also skip validation for speed once stable.
+
+H. What to measure for guiding on-the-fly tuning
+1) Track and log internally (no printing) for adaptive logic:
+   - acceptance rate per move type
+   - frequency of successful bin-count reductions
+   - average donor bin size for successful victim-emptying
+
+2) Adaptive move mix
+   - If victim-empty attempts succeed < 1% over last 2 epochs, increase ejection-chain probability and/or widen bucket sampling; if succeed > 5%, increase victim-empty weight.
+
+Expected impact
+- Bucket-guided best-fit relocations increase the quality of each accepted move.
+- Convex slack penalty (sum rem^2) makes SA actively create tight bins and larger slack “reservoir” bins, which are easier to eliminate.
+- Victim-emptying and merge moves directly target bin-count reductions—the main driver of the ratio metric.
+- Acceptance-rate-controlled temperature prevents premature freezing and reduces wasted iterations.
+
+Deliverable checklist (so implementation matches this plan)
+- Keep `solve(C, weights, time_limit)` signature and return format.
+- Use a calibration phase to compute a fixed `max_iters`.
+- Main loop runs `for it in range(max_iters)` with periodic `time_up()` checks; returns best-so-far if exceeded.
+- Use only `random` module.
+- SA remains the primary search: all improvements are neighborhood definitions + SA-standard temperature control and reheating.

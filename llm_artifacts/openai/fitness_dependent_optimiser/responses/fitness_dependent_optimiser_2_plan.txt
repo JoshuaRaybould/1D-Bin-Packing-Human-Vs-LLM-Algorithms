@@ -1,0 +1,207 @@
+### 1) Keep FDO as the primary search method, but fix its weakest aspects
+
+#### 1.1 Replace “single global best attraction” with multi-leader guidance (still FDO)
+**Problem:** Current update uses only `best_pos`. This collapses diversity early and makes it hard to escape plateaus.
+
+**Plan:** Maintain an **elite set** (e.g., top `E=5` scouts by fitness) each iteration. For each scout update, choose a leader `L` from elites with probability biased by rank (e.g., roulette on 1/(rank+1)). Update step uses that leader rather than always the global best. 
+
+- Compute `elite_indices` each outer iteration.
+- For scout `i`, pick `leader = elites[random.choices(...)]`.
+- Use `leader_pos` in the step: `step = r * wf * (leader_pos[d] - x)`.
+
+This is still FDO-style movement but reduces premature convergence.
+
+#### 1.2 Add opposition-based / restart injection for stagnation (FDO population management)
+**Problem:** Once many scouts share similar priority vectors, evaluations become redundant.
+
+**Plan:** Track stagnation counters:
+- `no_improve_iters_global` (global best not improved)
+- `no_improve_iters_i` (scout i not improved)
+
+When:
+- `no_improve_iters_global >= Sg` (e.g., 40), perform a **partial restart**: reinitialize the worst `ceil(pop_size*0.25)` scouts.
+- For scout-level stagnation: if `no_improve_iters_i >= Si` (e.g., 25), replace that scout with either:
+  1) a new seeded priority vector (see §2.1), or
+  2) an “opposite” vector: `x’[d] = lo + hi - x[d]` plus small noise.
+
+This is a standard population-diversification tactic and keeps FDO as the main loop.
+
+#### 1.3 Make wf and noise schedules adaptive to progress
+**Problem:** Current wf computation uses a scalar gap; noise decays linearly regardless of stagnation.
+
+**Plan:**
+- Keep the scalar fitness but rescale it more aggressively (see §3).
+- Set `noise_amp` based on stagnation:
+  - baseline decay with iteration, but if `no_improve_iters_global` is high, temporarily **increase noise** (e.g., multiply by 1.5–2.0, capped).
+- Let `wf_max` expand when stuck (e.g., up to 1.5) to allow larger steps.
+
+This increases exploration only when needed, improving time usage.
+
+#### 1.4 Use dimension updates that actually change order
+**Problem:** For large n, changing random dimensions often does not change the sort order; many decodes repeat the same order.
+
+**Plan:** Update a **structured subset** of dimensions:
+- Precompute items grouped by weight (or by weight quantiles).
+- When choosing `idxset`, sample more from **heaviest items** (e.g., top 30% weights) because they dominate feasibility and bin count.
+- Also, sometimes apply a **block perturbation**: pick a weight group and perturb all items in that group together.
+
+This increases the chance that ordering changes meaningfully.
+
+---
+
+### 2) Strengthen decoding (still just decoding), while keeping it fast
+
+Decoding quality is currently bounded by Best-Fit with a single order and simple tie-break. Improve it by making the decoder itself stronger and more order-sensitive, without adding a separate “local search” phase.
+
+#### 2.1 Multi-start decoding per evaluation (cheap internal portfolio)
+**Problem:** A single greedy pass is brittle.
+
+**Plan:** For each candidate `priorities`, generate **K alternative induced orders** cheaply and keep the best decoded packing among them. K must be small (2–4) and adaptive to time.
+
+Implementation-ready options:
+- Base order: sort by `(priority, weight)` as now.
+- Variant A: sort by `(priority, -weight)` (flip tie-break).
+- Variant B: sort by `(alpha*priority + (1-alpha)*(weight/maxw), weight)` with alpha in {0.7, 0.9}.
+- Variant C (rare): reverse segments (see §2.3).
+
+Evaluate decode for each variant; take best by fitness. 
+**Time control:** If `n` is large, use K=2; if small, K=3–4.
+
+This is still part of the genotype→phenotype decoding, not a separate local search.
+
+#### 2.2 Replace bucket linear scan with “next non-empty” structure
+**Problem:** Current best-fit finds smallest r>=w by scanning `for r in range(w, C+1)`; this is O(C) per item in worst case. For larger capacities this dominates runtime, limiting iterations.
+
+**Plan:** Maintain a fast structure to find the next non-empty remaining capacity:
+
+Option 1 (simple, stdlib):
+- Maintain a `bitset` using Python `int` where bit r indicates buckets[r] non-empty. Update bits on push/pop.
+- To find smallest r>=w with a set bit: mask off lower bits and use `(masked & -masked)` trick to locate least set bit; translate bit position via `.bit_length()`.
+
+Option 2:
+- Maintain a sorted list of non-empty r’s using `bisect` (but updates can be costly).
+
+**Recommend Option 1** because it is fast in Python and capacity C is known. This turns “find bin” into near O(1).
+
+This change alone should allow many more FDO evaluations within the same time.
+
+#### 2.3 Add a controlled “first-fit fallback” when best-fit is too myopic
+**Problem:** Best-Fit can over-fragment slack and harm bin elimination later.
+
+**Plan:** In decoding, choose placement rule probabilistically based on priority/iteration:
+- With probability p (small, e.g., 0.10–0.20 early; lower later), use **First-Fit** (first bin that fits in some maintained order of bins), otherwise Best-Fit.
+- Implement FF using bins tracked by remaining capacity but selecting any r>=w; simplest is to still use bitset but pick **largest** r (worst-fit) occasionally or pick a random feasible r among a small set.
+
+This yields more diverse packings from the same order, improving exploration without leaving the “decoder” concept.
+
+#### 2.4 Deterministic bin indexing and stable updates
+**Problem:** Using `.pop()` from bucket lists introduces arbitrary bin choice; that randomness is uncontrolled and may add noise that does not correlate with priorities.
+
+**Plan:** Make bin choice deterministic given a candidate (or controlled by the same random stream):
+- Prefer bins with fewer items (or older bins) when multiple have same remaining capacity.
+- Store bins in buckets as stacks but push/pop consistently; or keep a small policy: pop last, but ensure bins enter buckets in deterministic order.
+
+This reduces evaluation noise and makes FDO’s fitness signal cleaner.
+
+---
+
+### 3) Improve fitness shaping to better target “remove a bin”
+
+Current fitness: `(k, total_slack)` is weak: total slack doesn’t directly reflect whether bins can be merged to reduce k.
+
+#### 3.1 Use a lexicographic multi-component fitness (still comparable tuples)
+**Plan:** Keep primary objective `k`. Replace secondary with measures that correlate with eliminability:
+
+Use:
+1. `k` (bins)
+2. `n_almost_full = -count(bw >= C - t)` for small threshold t (e.g., 1–3 or `max(1, C//50)`). More almost-full bins is good (so negative to minimize).
+3. `max_slack` (minimize the largest slack) or better: `sum(slack^2)` to penalize large slack bins.
+4. `total_slack` (as last tie-break)
+
+So fitness tuple example:
+`(k, max_slack, sum_sq_slack, total_slack)`
+
+Why: fewer large-gap bins typically makes it easier to pack remaining items without opening new bins.
+
+#### 3.2 Scalar mapping for wf should reflect lexicographic distance
+**Problem:** Current scalar uses `k + slack/(C*n)`; slack differences can dominate incorrectly or be too weak.
+
+**Plan:** Build scalar as:
+`scalar = k + (max_slack / (C+1)) * 0.1 + (total_slack / (C*n+1)) * 0.01`
+(or similar) ensuring that any reduction in k dominates, but slack structure still influences wf.
+
+---
+
+### 4) Population sizing and iteration budgeting that uses full time (up to 100s)
+
+#### 4.1 Fixed iteration count, but calibrate to n and expected decode cost
+Hard requirement: fixed number of iterations chosen.
+
+**Plan:**
+- Choose `max_iters` as a function of n, but fixed once per call, e.g.:
+  - `max_iters = 2000` for n<=200
+  - `max_iters = 1200` for 200<n<=800
+  - `max_iters = 800` for n>800
+
+Because decode will be faster after §2.2, this will typically run until time limit and stop by time check.
+
+#### 4.2 Increase population slightly and use steady-state updates
+**Problem:** pop_size 12–50 may be okay, but with better decode speed we can afford more diversity.
+
+**Plan:**
+- Set `pop_size = clamp(25, 80, 20 + 6*sqrt(n))`.
+- Use **steady-state**: update scouts sequentially and immediately insert improved solutions (already done). With elites (§1.1), this works well.
+
+---
+
+### 5) Better initialization (cheap wins)
+
+#### 5.1 Seed with known strong constructive orders (encoded as priorities)
+**Problem:** Current seeded priorities are basically weight-based with noise.
+
+**Plan:** Create several deterministic seed priority vectors that correspond to classic heuristics:
+- FFD-like: priority = weight + tiny decreasing index jitter.
+- BFD-like: same but with different tie-break.
+- “Complement” heuristic: priority = abs((C/2) - weight) (prioritize items near half capacity), useful for tight pairing.
+- Mixed: priority = a*weight + b*random, with a in {1.0, 0.7}.
+
+Add these as the first ~E seeds; remaining are random/noisy variants.
+
+This improves the starting best and gives FDO better leaders.
+
+---
+
+### 6) Data handling and micro-optimizations that buy more evaluations
+
+These are implementation details that materially affect how many candidate packings you can evaluate per second.
+
+- Precompute `weights`, `maxw`, maybe `norm_w = weight/maxw` list.
+- Avoid recreating large lists repeatedly:
+  - Reuse `order` list buffer when possible.
+  - In decode, avoid deep copying bins unless needed (store only when accepted). For best-so-far, keep indices; for population you can store only `bin_w` + a compact assignment array if memory/time becomes an issue.
+- Time checks:
+  - Keep cadence checks (every 64 items) but also add a cheap outer-loop check.
+
+Net effect: more FDO iterations within the same wall-clock.
+
+---
+
+### 7) Validation and expected impact
+
+1. **Bitset next-nonempty** for best-fit should significantly reduce decode time when C is moderate/large, increasing evaluated solutions.
+2. **Multi-leader + restarts** should reduce premature convergence and improve late-stage improvements (closing the last few bins).
+3. **Portfolio decoding (K=2–4)** increases robustness of each evaluation; even if it reduces evaluations count slightly, it often improves best-found bins faster.
+4. **Fitness shaping** aligns the search with bin elimination rather than just slack minimization.
+
+---
+
+### 8) Implementation checklist (concrete steps)
+
+1. Replace bucket scan with bitset-based “find next r>=w”.
+2. Refactor `decode` to accept an `order` (list of item indices) and placement policy flag; implement 2–4 order variants per candidate.
+3. Update fitness function to return a 3–4 component tuple; adjust scalar computation accordingly.
+4. Add elite set selection each iteration; use elite leader in step.
+5. Add stagnation counters; implement partial restarts and scout reinitialization.
+6. Adjust population size and max_iters schedule; keep time checks and return best-so-far on timeout.
+
+All changes keep `solve(bin_capacity, weights, time_limit)` signature, return format, use only global `random`, perform no import-time execution, and keep FDO as the primary search method (decoder improvements are part of evaluation, and restarts/elites are standard population-based metaheuristic mechanisms).

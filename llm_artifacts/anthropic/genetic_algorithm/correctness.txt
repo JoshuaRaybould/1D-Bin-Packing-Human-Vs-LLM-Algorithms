@@ -1,0 +1,13 @@
+genetic_algorithm_0_initial : CORRECT
+genetic_algorithm_0_post_plan : CORRECT
+genetic_algorithm_0_performance_3 : CORRECT
+genetic_algorithm_0_performance_4 : CORRECT
+genetic_algorithm_1_initial : CORRECT
+genetic_algorithm_1_post_plan : CORRECT
+genetic_algorithm_1_performance_3 : CORRECT
+genetic_algorithm_1_performance_4 : CORRECT
+genetic_algorithm_2_initial : CORRECT
+genetic_algorithm_2_post_plan : CORRECT
+genetic_algorithm_2_performance_3 : CORRECT
+genetic_algorithm_2_performance_4 : CORRECT
+genetic_algorithm_2_performance_4 : best 1.0119044759140396

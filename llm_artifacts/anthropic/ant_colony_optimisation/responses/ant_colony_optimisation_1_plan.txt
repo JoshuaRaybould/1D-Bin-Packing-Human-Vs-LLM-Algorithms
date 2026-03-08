@@ -1,0 +1,166 @@
+## Detailed Implementation Plan
+
+### Overview
+Replace the item-oriented construction with a **bin-oriented construction** approach within an MMAS (MAX-MIN Ant System) framework. This is the standard, most effective ACO variant for bin packing.
+
+---
+
+### Step 1: Preprocessing and Initialization
+
+1. Sort items by decreasing weight, maintaining original index mapping (keep current approach).
+2. Precompute `total_weight = sum(weights)` and `lower_bound = ceil(total_weight / bin_capacity)` once.
+3. Also compute the **L2 lower bound**: count items larger than `bin_capacity/2` (call this `n_large`). For remaining items, greedily pair them with large items; unpaired small items need additional bins. Use `max(lower_bound, L2_bound)` as the target.
+4. Run FFD (First Fit Decreasing) as the initial best solution (keep current FFD implementation, it's fine).
+5. Also run BFD (Best Fit Decreasing) and keep the better of the two as initial best.
+
+### Step 2: Pheromone Data Structure
+
+1. Use a **sparse dictionary** for pheromone regardless of n. Key: `(min(i,j), max(i,j))`, value: float.
+2. Default pheromone value: `tau_init` (computed dynamically, see MMAS rules).
+3. **MMAS bounds**:
+   - `tau_max = 1.0 / (rho * best_num_bins)`
+   - `tau_min = tau_max / (2 * n)` (clamped to at least 0.01)
+   - `tau_init = tau_max` (start optimistic to encourage exploration)
+4. Recalculate `tau_max` and `tau_min` whenever `best_num_bins` improves.
+
+### Step 3: Bin-Oriented Ant Construction
+
+Replace `construct_solution()` entirely with:
+
+```
+def construct_solution():
+    remaining = set(range(n))  # sorted-order indices
+    remaining_by_weight = sorted list maintained for quick access
+    bins_result = []
+    
+    while remaining is not empty:
+        # Open a new bin
+        current_bin = []
+        current_remaining_cap = bin_capacity
+        
+        # Seed: pick the largest remaining item (deterministic)
+        seed = largest item in remaining
+        Add seed to current_bin, update current_remaining_cap
+        Remove seed from remaining
+        
+        # Iteratively fill the bin
+        while True:
+            # Find feasible candidates: items in remaining with weight <= current_remaining_cap
+            feasible = [i for i in remaining if sorted_weights[i] <= current_remaining_cap]
+            
+            if not feasible:
+                break
+            
+            # Compute scores for each feasible item
+            scores = []
+            for candidate in feasible:
+                # Pheromone: average pheromone between candidate and all items in current_bin
+                pheromone_val = sum(get_tau(candidate, item) for item in current_bin) / len(current_bin)
+                
+                # Heuristic: favor items that fill the bin tightly
+                remaining_after = current_remaining_cap - sorted_weights[candidate]
+                eta = 1.0 / (remaining_after + 1.0)
+                
+                score = (pheromone_val ** alpha) * (eta ** beta)
+                scores.append(score)
+            
+            # Also add a "close bin" pseudo-option
+            # Score for closing = small constant, scaled by how full the bin already is
+            fill_ratio = 1.0 - (current_remaining_cap / bin_capacity)
+            close_score = close_bin_base * (fill_ratio ** 2)  # more likely to close nearly-full bins
+            
+            total = sum(scores) + close_score
+            
+            # Roulette wheel selection
+            r = random.random() * total
+            cumulative = 0.0
+            chosen = -1  # -1 means close bin
+            for idx, s in enumerate(scores):
+                cumulative += s
+                if cumulative >= r:
+                    chosen = feasible[idx]
+                    break
+            
+            if chosen == -1:
+                break  # close this bin
+            
+            Add chosen to current_bin, update current_remaining_cap
+            Remove chosen from remaining
+        
+        bins_result.append(current_bin)
+    
+    return bins_result, len(bins_result)
+```
+
+**Key parameters for bin-oriented construction:**
+- `alpha = 1.0` (pheromone importance)
+- `beta = 2.5` (heuristic importance - slightly higher to favor tight fits)
+- `close_bin_base = 0.1` (tunable; small to discourage premature closing)
+
+### Step 4: Feasible Candidate Optimization
+
+To avoid scanning all remaining items for feasibility:
+1. Maintain remaining items as a **sorted list by weight** (descending).
+2. Use binary search to quickly find the cutoff index where `sorted_weights[i] <= current_remaining_cap`.
+3. Only iterate over feasible items (those with weight ≤ remaining capacity).
+4. If feasible list is very large (>50 items), use a **candidate list** of the top-50 items by score heuristic (pre-filter by best-fit heuristic, then apply full ACO scoring only to these). This dramatically speeds up large instances.
+
+### Step 5: MMAS Pheromone Update
+
+After all ants in an iteration:
+
+1. **Evaporation**: Multiply all stored pheromone values by `(1 - rho)`. Remove entries that fall below `tau_init * 0.95` (i.e., close to default, save memory). Use `rho = 0.02` (slower evaporation for better exploitation).
+
+2. **Deposit**: Use a schedule that alternates:
+   - **Iteration-best deposit**: In most iterations, deposit from the iteration-best ant.
+   - **Global-best deposit**: Every 5th iteration (or when stagnating), deposit from global best.
+   - Deposit amount: `delta = 1.0 / num_bins_of_solution`
+   - For each pair (i,j) in same bin: `tau[i][j] += delta`
+   - Clamp all updated values to `[tau_min, tau_max]`.
+
+3. **Stagnation detection**: Track if no improvement in last 50 iterations. If stagnated:
+   - Reset all pheromones (clear sparse dict, effectively resetting to `tau_init = tau_max`)
+   - Deposit heavily from global best to re-seed
+
+### Step 6: Ant Count and Iteration Budget
+
+1. Use `num_ants = 15` for n ≤ 200, `num_ants = 10` for n ≤ 500, `num_ants = 5` for larger.
+2. Time checks: check time after every ant (not just every 3rd).
+3. Use `time_limit * 0.98` as the cutoff to be safe.
+
+### Step 7: Solution Improvement via Re-targeting
+
+1. After finding a solution with K bins, set target to K-1.
+2. Boost `tau_max` and re-initialize pheromones to encourage finding K-1 bin solutions.
+3. This creates a decreasing-target search that pushes toward optimality.
+
+### Step 8: Multiple Restarts
+
+1. If no improvement for 100 iterations, perform a pheromone restart (reset to `tau_max`).
+2. Keep global best across restarts.
+3. On restart, vary `alpha` and `beta` slightly (e.g., `beta` in {2.0, 2.5, 3.0}) to diversify search.
+
+### Step 9: FFD Seeding of Pheromone
+
+1. After initializing pheromone matrix, deposit from the FFD solution with a moderate boost (2× normal deposit).
+2. This biases initial search toward the FFD solution structure while still allowing exploration.
+
+### Step 10: Output Conversion
+
+Keep the existing `convert_solution()` function that maps sorted-order indices back to original indices.
+
+---
+
+### Summary of Expected Improvements
+
+| Weakness | Improvement |
+|---|---|
+| Item-oriented construction produces loose bins | Bin-oriented construction naturally produces tighter bins |
+| O(n²) dense pheromone matrix | Sparse dict for all sizes |
+| Static parameters | MMAS with dynamic tau bounds, stagnation restarts |
+| Simple evaporation wastes time on large matrices | Sparse evaporation, only stored entries |
+| No feasibility filtering | Sorted remaining items + binary search for feasibility |
+| Fixed 10 ants | Adaptive ant count by problem size |
+| No stagnation handling | Pheromone restart after 100 non-improving iterations |
+| Lower bound computed inside loop | Precomputed, includes L2 bound |
+| Only FFD for initial solution | FFD + BFD, keep best |

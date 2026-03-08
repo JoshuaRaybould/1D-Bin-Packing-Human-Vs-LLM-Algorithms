@@ -1,0 +1,13 @@
+ant_colony_optimisation_0_initial : CORRECT
+ant_colony_optimisation_0_post_plan : CORRECT
+ant_colony_optimisation_0_performance_3 : CORRECT
+ant_colony_optimisation_0_performance_4 : CORRECT
+ant_colony_optimisation_1_initial : CORRECT
+ant_colony_optimisation_1_post_plan : CORRECT
+ant_colony_optimisation_1_performance_3 : CORRECT
+ant_colony_optimisation_1_performance_4 : CORRECT
+ant_colony_optimisation_2_initial : CORRECT
+ant_colony_optimisation_2_post_plan : CORRECT
+ant_colony_optimisation_2_performance_3 : CORRECT
+ant_colony_optimisation_2_performance_4 : CORRECT
+ant_colony_optimisation_2_performance_4 : best 1.0267626496022877

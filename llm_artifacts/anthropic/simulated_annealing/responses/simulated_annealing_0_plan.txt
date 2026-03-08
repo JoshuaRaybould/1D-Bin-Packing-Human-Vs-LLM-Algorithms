@@ -1,0 +1,124 @@
+# Detailed Implementation Plan for Improved Simulated Annealing Bin Packing
+
+## Phase 1: Data Structure Optimization
+
+### 1.1 Primary Representation
+- Use `item_bin: list[int]` as the single source of truth for which bin each item belongs to.
+- Use `bin_loads: list[int]` for tracking bin loads (kept incrementally).
+- Use `bin_items: list[list[int]]` — lists instead of sets for bin contents. Use `O(1)` removal via swap-with-last idiom:
+  - Store `item_pos_in_bin: list[int]` mapping each item to its index within its bin's list.
+  - To remove item from bin: swap it with the last element in that bin's list, update `item_pos_in_bin` for the swapped element, then pop.
+  - To add item to bin: append and record position.
+- This eliminates all set operations and `rebuild_bin_list` calls.
+
+### 1.2 Bin Removal (Empty Bin Compaction)
+- When a bin becomes empty, swap it with the last bin in the list. Update `item_bin` and `item_pos_in_bin` for all items in the swapped bin. Pop the last entry.
+- Track `num_bins` as `len(bin_items)`.
+
+## Phase 2: Improved Initial Solution
+
+### 2.1 Multiple Initial Heuristics
+- Run FFD (First Fit Decreasing) — current approach.
+- Also run BFD (Best Fit Decreasing): for each item in decreasing weight order, place in the bin with the least remaining capacity that still fits.
+- Compare the two and start SA from whichever uses fewer bins (tie-break by higher sum-of-squares score).
+- Both heuristics are fast (O(n log n) or O(n * bins)), so this adds negligible time.
+
+## Phase 3: SA Move Operators (Redesigned)
+
+### 3.1 Move Type 1: Single Item Transfer (50% probability)
+- Select source bin: 70% chance pick the least-loaded bin (tracked — see 4.1), 30% chance random bin.
+- Select a random item from source bin using the list + random index.
+- Select destination bin: iterate through a small random sample (up to 8 bins) and pick the one with highest load that still fits the item (best-fit style). If none found, skip.
+- Compute delta score and accept/reject per SA criterion.
+
+### 3.2 Move Type 2: Pairwise Swap (30% probability)
+- Pick two random bins b1, b2 (b1 != b2).
+- Pick random item from each.
+- Check feasibility of swap (both new loads <= capacity).
+- Compute delta and accept/reject.
+- Enhancement: if the first random pair doesn't produce a feasible swap, try up to 3 more random pairs before giving up.
+
+### 3.3 Move Type 3: Targeted Bin Elimination (20% probability)
+- Identify the least-loaded bin.
+- For each item in that bin (iterate in random order), find the best-fit destination (most loaded bin that still fits the item).
+- Execute the move greedily (always accept if feasible) for each item.
+- If the entire bin is emptied, great — remove it. If not, the partial progress still helps (items moved to fuller bins improve score).
+- This is a compound move but evaluated item-by-item with individual SA acceptance.
+
+**Note**: Probabilities are: r < 0.50 → Move, r < 0.80 → Swap, r < 1.0 → Targeted elimination.
+
+## Phase 4: Temperature Schedule & Control
+
+### 4.1 Time-Based Adaptive Temperature
+- Compute temperature as a function of elapsed time fraction: `frac = elapsed / total_time`.
+- Use a piecewise schedule:
+  - Phase 1 (frac 0.0–0.3): High temperature. `T = T_max * (1 - frac/0.3) + T_mid * (frac/0.3)` where `T_max = C² * 0.5`, `T_mid = C² * 0.05`.
+  - Phase 2 (frac 0.3–0.8): Medium temperature with slow decay. Linear interpolation from `T_mid` to `T_low = C² * 0.005`.
+  - Phase 3 (frac 0.8–1.0): Low temperature greedy refinement. Linear from `T_low` to `T_min = 0.01`.
+- Recompute T every `check_interval` iterations using wall clock time.
+- This ensures full utilization of the time budget with appropriate exploration/exploitation balance.
+
+### 4.2 Periodic Perturbation (Diversification)
+- Track iterations since last improvement to `best_num_bins`.
+- If no improvement for 100,000 iterations:
+  - Pick 2-3 random bins, remove all their items.
+  - Redistribute those items using BFD into existing bins (creating new bins only when necessary).
+  - Reset the stagnation counter.
+  - Temporarily boost temperature to `T_mid`.
+- This provides diversification without completely restarting.
+
+## Phase 5: Tracking & Caching
+
+### 5.1 Least-Loaded Bin Tracking
+- Instead of scanning all bins each time, maintain a variable `min_bin` that tracks the index of the least-loaded bin.
+- Update after each move: if the modified bin's load is less than current min, update. If the min bin was modified and its load increased, do a full rescan.
+- The rescan is rare compared to the update, so amortized cost is low.
+
+### 5.2 Best Solution Storage
+- Only copy the full solution state when `num_bins` strictly decreases (rare event).
+- When `num_bins == best_num_bins` and score improves, still copy but this is also relatively rare.
+- Use `item_bin[:]` (list copy) and `bin_loads[:]` as the compact best-state representation. Reconstruct `packing` only at the end from `best_item_bin`.
+
+### 5.3 Score Tracking
+- Maintain `current_score` incrementally (already done). Ensure delta computation is correct for all move types including bin elimination.
+- The score function: `score = -num_bins * C² * (n+1) + sum(load²)`. This heavily penalizes extra bins while preferring balanced-full bins.
+
+## Phase 6: Iteration Speed Optimization
+
+### 6.1 Reduce Function Call Overhead
+- Inline the `find_smallest_bin` logic or use the cached version from 5.1.
+- Use local variable aliases for frequently accessed globals: `_random = random.random`, `_randrange = random.randrange`, `_choice = random.choice`, `_exp = math.exp`.
+- Remove try/except around exp() — instead, clamp `delta/T` to prevent overflow: `if delta/T < -500: accept = False`.
+
+### 6.2 Check Interval Tuning
+- Use `check_interval = 2000` since `time.time()` calls are relatively expensive in tight Python loops.
+- Also update temperature at each check interval based on elapsed time.
+
+### 6.3 Avoid Unnecessary Work
+- In swap moves, skip if w1 == w2 (already done).
+- In transfer moves, skip if source bin has only 1 item and it doesn't fit anywhere (quick check: if `wi > bin_capacity - min_load_of_other_bins`).
+
+## Phase 7: Output Construction
+
+- At the end, reconstruct packing from `best_item_bin`:
+  ```
+  packing = [[] for _ in range(best_num_bins)]
+  for i, b in enumerate(best_item_bin):
+      packing[b].append(i)
+  ```
+- Compute `bin_weights` from packing.
+- Sort each bin's items (optional, for consistency).
+
+## Summary of Expected Improvements
+
+| Aspect | Current | Proposed | Expected Impact |
+|--------|---------|----------|-----------------|
+| Data structures | Sets + parallel lists | Lists with swap-remove | 2-3x iteration speed |
+| Initial solution | FFD only | FFD + BFD, pick best | Minor bin reduction |
+| Move operators | Basic transfer/swap | + targeted elimination, best-fit dst | Better search quality |
+| Temperature | Fixed geometric + reheat | Time-based adaptive | Better exploration |
+| Diversification | Temperature reheat only | Perturbation + reheat | Escape local optima |
+| Min-bin tracking | Linear scan | Cached with lazy update | Faster iterations |
+| Solution saving | Full copy every improvement | Compact copy, reconstruct at end | Less overhead |
+
+Target: Reduce ratio from 1.0286 to ≤1.015, eliminating ~150+ of the 316 extra bins.

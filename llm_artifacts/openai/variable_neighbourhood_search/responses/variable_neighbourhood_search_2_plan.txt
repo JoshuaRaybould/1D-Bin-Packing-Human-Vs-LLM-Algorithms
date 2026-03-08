@@ -1,0 +1,211 @@
+### 1) Keep the overall VNS structure, but change the objective hierarchy and acceptance
+**Goal:** prioritize bin-count reduction much more aggressively while still using a secondary criterion.
+
+1. **Primary objective:** minimize `B = #bins`.
+2. **Secondary objective:** minimize total slack (or slack²) **only among solutions with the same B**.
+3. **Acceptance rule (VNS main loop):**
+   - Always accept if `cand_B < curr_B`.
+   - If `cand_B == curr_B`, accept if `cand_secondary < curr_secondary`.
+   - Additionally add *occasional sideways acceptance* among equal-B solutions to diversify (standard in VNS variants): with small probability `p_side` accept even if secondary is slightly worse (bounded), e.g. `cand_secondary <= curr_secondary + delta`, where `delta` depends on C and B. This helps escape local minima without leaving VNS.
+
+4. **Best solution tracking:** maintain best by (B, secondary). Keep it.
+
+Why: current search often improves slack² but gets stuck at same B; adding more bin-reduction neighborhoods plus a slightly more exploratory acceptance improves reaching B-1 solutions.
+
+---
+### 2) Replace expensive full recomputation with incremental bookkeeping
+**Goal:** increase move attempts per second.
+
+Implement a `SolutionState` internal structure (still plain lists/dicts) with:
+- `bins: List[List[int]]`
+- `loads: List[int]`
+- `pos_bin: List[int]` and `pos_idx: List[int]` maintained **incrementally** for all moves (relocate/swap/remove/insert). Do *not* call `compute_positions` inside inner loops except after large rebuilds.
+- Maintain `secondary_score` incrementally (slack² or slack). When a move affects bins i and j, update score by subtracting old contributions and adding new.
+
+Also add:
+- `nonempty_bins: List[int]` or maintain a compacting strategy; avoid frequent `cleanup_empty` by using lazy empty marking and periodically rebuilding.
+
+**Periodic rebuild:** every X moves or when empty bins exceed a threshold, rebuild bins compactly and recompute positions once.
+
+Why: current VND repeatedly recomputes positions and scores; this is a major time sink.
+
+---
+### 3) Stronger initial solutions (still constructive, still standard for packing/VNS)
+**Goal:** start closer to optimum so VNS spends time on the hard last bins.
+
+Run **multi-start construction** within a small initial time slice (e.g. 2–5% of budget):
+1. Deterministic **FFD** and **BFD** on descending weights.
+2. **Randomized FFD/BFD**: perturb order using:
+   - shuffle within equal-weight blocks,
+   - small random noise key: sort by `(-w[i], random.random())` but only within same weight to preserve quality.
+3. **Alternate heuristic:** “Best-Fit with lookahead”: when multiple bins have same remaining capacity after placement, break ties by preferring bins that create remaining capacity that matches some heavy item (simple frequency table of weights).
+
+Keep the best (B, secondary), then apply VND.
+
+Why: many instances are decided by early packing decisions; better starts reduce the need for deep escapes.
+
+---
+### 4) Overhaul VND: add bin-reduction neighborhoods used in strong VNS for bin packing
+Current VND has:
+- try-empty-bin via greedy relocation (all-or-nothing)
+- then slack² improvement via 1-move and random swap
+
+Replace with a **deterministic neighborhood schedule** (classic VND):
+
+#### Neighborhood N1: “Empty one bin” with *multi-bin target + ordering + limited backtracking*
+For each candidate source bin `b` (process lightest bins first):
+1. Sort items in `b` descending.
+2. For each item, choose among feasible target bins using **best-fit** *but* restrict to bins with enough slack and favor bins that become near-full.
+3. Allow **limited backtracking**: if placement fails for an item, try alternative target for one of the previous 1–2 items (bounded branching). Keep it cheap.
+4. If success: delete bin. This is the highest-value improvement.
+
+Key change: don’t clone/rollback whole solution per attempt. Instead:
+- Record a short move stack (item, from, to, swapped-with if any) and undo quickly if failed.
+
+#### Neighborhood N2: 2–1 exchange (move two items from a heavy bin into other bins, bring one back)
+Standard bin packing improvement: pick a candidate bin to reduce or to free space.
+Procedure:
+- Choose source bin `b` (light) you want to empty.
+- For an item `x` in `b` that cannot be placed anywhere, try to **eject** one item `y` from a target bin `t` so that `x` fits in `t`, and then place `y` elsewhere.
+- Limit chain length to 2 (two-step ejection), which is often enough to empty a bin.
+
+Implementation detail:
+- Maintain bins sorted by remaining capacity (or bucketed by slack) to quickly find candidate target bins.
+- For each `x`, consider top K target bins whose slack is closest to `w[x]` (K small like 10–30).
+
+#### Neighborhood N3: 1–1 swap guided by feasibility and fill improvement
+Not random pairs. Do targeted:
+- Iterate items from problematic bins (light bins / bins with “awkward” slack).
+- For each item, search candidate swap partners from bins whose slack suggests a swap could allow later relocation.
+- Evaluate if swap improves secondary or enables a later empty-bin attempt.
+
+#### Neighborhood N4: “Fill holes” relocation: move items into high-slack bins to make other bins emptyable
+This is still 1-move, but targeted:
+- Work with bins with largest slack (holes).
+- Find items from other bins that fit tightly.
+- Use weight-to-item lists to quickly find candidates (see Section 6).
+
+#### VND control:
+Run N1 → N2 → N3 → N4 in order; whenever B decreases, restart from N1.
+If B unchanged but secondary improves beyond a small threshold, restart at N1 as well (since configuration changed).
+
+Why: these neighborhoods directly address the “last extra bins” problem; slack²-only moves are insufficient.
+
+---
+### 5) Redesign shaking to be *guided* and matched to neighborhoods
+Current shake is partly random and “destroy/repair” uses plain best-fit, which is too weak.
+
+Keep k=1..kmax but redefine:
+
+#### k=1 (small): targeted single relocation from a *tight bin* to create a new packing opportunity
+- Pick an item from a bin with near-full load (or from a bin blocking empty-bin attempts).
+- Move it to a bin where it fits loosely (increase slack somewhere), to enable later N1/N2.
+
+#### k=2: ejection-style shake
+- Pick item x from a light bin and force-insert it into best target bin by swapping out y (even if secondary worsens), then reinsert y.
+
+#### k=3: “bin split and re-pack” (partial destruction)
+- Choose 2–3 bins (prefer lightest + one medium) and remove all items from them.
+- Repack those items with a stronger repair (below) into existing bins, creating new bins only if needed.
+
+#### k=4+: Large Neighborhood Destroy/Repair (LNS inside VNS shaking is standard)
+- Remove r items OR remove all items from m randomly chosen bins (m increases with k).
+- Repair using **Regret-2 / Regret-3 insertion** (standard in packing/VRP style heuristics):
+  - For each removed item, compute best and second-best feasible bin placements by resulting slack.
+  - Insert the item with largest regret (difference between best and second-best), tie-break by heavier weight.
+- After repair, run VND.
+
+Why: guided LNS shaking + strong repair reaches new basins where N1/N2 can eliminate bins.
+
+---
+### 6) Add fast candidate-selection data structures (pure Python)
+To make N1/N2/N4 fast, avoid scanning all bins/items repeatedly.
+
+1. **Slack buckets:** remaining capacity `r = C - load` in [0..C].
+   - Maintain `bins_by_slack[r] -> list of bin indices` (or sets) updated when loads change.
+   - Then for an item weight `wi`, candidate bins are in buckets `r in [wi..wi+W]` where W is a small window.
+
+2. **Items-by-weight index:** `items_of_weight[weight] -> list of items` (static). Helps find candidates for filling holes.
+
+3. **Top-K bins by slack:** Maintain a small list of bins with highest slack updated periodically, used for hole-filling.
+
+4. Use **bounded candidate lists** everywhere (e.g., examine at most 20–50 candidate bins per move). This increases the number of iterations possible.
+
+---
+### 7) Improve feasibility and rollback mechanics
+Avoid cloning whole solutions frequently.
+
+- Implement move primitives returning an “undo record” (enough info to revert):
+  - relocate undo: (item, from_bin, to_bin, from_idx, swapped_item_if_any, created_new_bin_flag)
+  - swap undo: (a,b, bin_a,bin_b, idx_a,idx_b)
+- In N1/N2 attempts, push undo records; if fail, pop and undo.
+
+Do a full clone only:
+- when updating `best_solution`.
+- occasionally when restarting `curr` from best.
+
+Why: cloning dominates runtime in Python for large n.
+
+---
+### 8) Time/iteration budgeting: use the full budget up to 100s safely
+Requirement says fixed iteration budget + time checks; no penalty for longer; stop at 100 seconds.
+
+Plan:
+- Set `deadline = start + min(max(time_limit, 0.0), 100.0)` (cap at 100).
+- Use a **fixed outer iteration budget** that scales with n, but large enough to fill time:
+  - `iter_budget = base + a*n` (e.g., base=2000, a=50) with an upper cap to avoid absurd loops.
+- Inside loops, check time every `check_every` operations (e.g., every 200 move evaluations), not every single one. Use a simple counter.
+
+Also add **adaptive kmax**:
+- Start with kmax=8–12 for diversification.
+- If improvements occur, keep k small; if stagnation for S iterations, increase kmax temporarily.
+
+Still fixed iteration count overall; only internal parameter changes.
+
+---
+### 9) Intensification/diversification schedule (still VNS)
+Add a clear schedule that uses time better:
+
+- Maintain `stagnation_counter` (iterations since best B improved).
+- If stagnation is small: emphasize intensification (small k, more VND passes).
+- If stagnation grows: use larger shakes (k>=4 destroy/repair) more frequently.
+- Periodic restart: every R outer iterations, set `curr = best`, then apply a medium shake (k=3..5), then VND.
+
+Why: current restart every 25 is arbitrary; tie it to stagnation for better allocation.
+
+---
+### 10) Secondary objective refinement
+Slack² is fine but sometimes misleads. Consider:
+- Secondary = tuple `(sum_slack, slack2)` or `(slack2, max_slack)`.
+- Or a weighted “profile”: penalize large unused capacity in any bin, but not at expense of creating many half-full bins.
+
+Keep it cheap and incremental.
+
+Why: better tie-breaking leads to configurations that are more “mergeable” later.
+
+---
+### 11) Validation & safety constraints
+- Always ensure each item appears exactly once. Add lightweight periodic verification only during rebuilds (optional, guarded by time).
+- Ensure all loads <= C.
+- Keep return format unchanged.
+
+---
+### 12) Step-by-step implementation order (concrete)
+1. **Refactor into stateful representation** with incremental `pos_bin/pos_idx` and incremental secondary score.
+2. Replace `compute_positions`, repeated `score_solution`, repeated `cleanup_empty` with:
+   - incremental updates,
+   - periodic rebuild/cleanup.
+3. Implement **undoable relocate/swap/remove/insert**.
+4. Implement improved **construction multi-start** (small time slice).
+5. Implement **VND neighborhoods N1–N4** with bounded candidate search and limited backtracking/ejection.
+6. Implement **guided shaking** including regret insertion repair.
+7. Implement new **time-check throttling** and increased iteration budget to exploit up to 100 seconds.
+8. Tune constants (K candidates, backtracking depth, removal size r, restart frequency) with small empirical sweeps.
+
+---
+### Expected impact
+- More bin eliminations via N1/N2 and guided LNS should reduce “extra bins” significantly (that’s where the 1.0286 ratio comes from).
+- Cutting Python overhead (no constant cloning/recompute) should allow many more neighborhood attempts within the same wall time.
+- Stronger repair (regret insertion) improves quality after shakes, increasing probability that VND can drop a bin.
+
+This keeps the primary method as VNS/VND, but upgrades it to the neighborhoods and efficiency typically required to close the last ~1–3% gap to the lower bound.

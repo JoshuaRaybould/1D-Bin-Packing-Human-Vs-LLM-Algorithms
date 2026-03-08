@@ -1,0 +1,228 @@
+## 0) Guardrails / invariants
+- Keep signature: `solve(bin_capacity, weights, time_limit)`.
+- Return `{ "packing": [...], "bin_weights": [...] }` aligned, validated.
+- Use **fixed `max_iter`** and periodic `time.perf_counter()` checks; stop early on time.
+- Use only global `random`.
+- Keep ACO as the primary search method; changes below are still ACO (MMAS + constructive ACO for BPP).
+
+---
+
+## 1) Replace permutation-pheromone with *grouping/compatibility* pheromone (core change)
+### 1.1 Pheromone definition
+Instead of `tau[prev][next]` over an item order, use pheromone that models how good it is to place two items in the **same bin**:
+- Let items be in **sorted order** positions `0..n-1` (keep mapping to original indices).
+- Maintain symmetric pheromone `tau_pair[i][j]` for `i<j`, representing desirability to co-pack.
+  - Implementation-friendly storage: list of lists full matrix `n x n` float (acceptable up to a few hundred; if n can be large, store only for a candidate neighborhood—see 1.4).
+- Additionally keep a small `tau_open[i]` (or `tau_item[i]`) for “start a new bin with item i” to guide bin leaders.
+
+This is a standard ACO modeling choice for BPP: pheromone encodes compatibility rather than adjacency in a tour.
+
+### 1.2 Construction process becomes *bin-by-bin* (not order-by-order)
+Each ant constructs a packing by repeatedly building one bin at a time:
+1) Maintain `unpacked` items.
+2) Choose a **seed item** for a new bin.
+3) While capacity remains, iteratively choose another item that fits, guided by:
+   - pheromone compatibility with items already in the bin
+   - a heuristic that favors tight fill
+4) Close the bin, start next bin until all items packed.
+
+This aligns choices with objective: bins are explicit units being optimized.
+
+### 1.3 Selection probabilities inside a bin
+When a bin currently contains set/list `B` and has remaining capacity `R`, candidate item `j` (unpacked, `w[j] <= R`) gets score:
+- `pher(j,B) = ( avg_{i in B} tau_pair[min(i,j)][max(i,j)] )^alpha`
+  - Use average (or sum) to avoid bias to larger |B|.
+- `heur(j,R) = ( (w[j] / R) + eps )^beta` to push tight fills *within the remaining space* (much better than using `w/C`).
+- Optional additional heuristic term to favor exact closure: multiply by `(1 + k_exact)` if `w[j]==R`.
+
+Score = `pher * heur`.
+Use roulette or (better) **pseudo-random proportional rule** (ACS-style):
+- with probability `q0` pick argmax score (exploitation)
+- else roulette (exploration)
+`q0` can be dynamic (start lower, increase over iterations).
+
+### 1.4 Candidate list to keep construction fast
+For each remaining capacity R, avoid scanning all unpacked items.
+- Maintain items sorted descending; also maintain for each capacity value a feasible prefix index via two-pointer, or simply keep unpacked in a list and use a “feasible candidates” builder.
+- Practical approach (fast in Python):
+  - Keep `unpacked` as a boolean list + a list of remaining indices.
+  - For each bin-fill step, generate candidates as:
+    - Top-K heaviest unpacked that fit (scan sorted list until collected K)
+    - Plus M random unpacked items that fit (sample from remaining list a few times)
+  - Typical: K=30, M=20.
+
+This keeps cost per decision bounded.
+
+---
+
+## 2) Upgrade to MMAS-style ACO (stability + intensification)
+### 2.1 Use iteration-best and global-best deposits, but in MMAS form
+- Evaporate all pheromones by `(1-rho)`.
+- Deposit only from:
+  - iteration-best (every iteration)
+  - global-best (every `g` iterations, e.g., 5)
+- **Do not deposit from all ants**; it increases noise and slows convergence.
+
+### 2.2 Set τ bounds dynamically (true MMAS)
+Instead of fixed `tau_min/tau_max`, compute:
+- `tau_max = 1 / (rho * f_best)` for minimization, with an appropriate `f_best` scale.
+- `tau_min = tau_max * (1 - p_best^(1/n)) / ((n/2 - 1) * p_best^(1/n))` (classic MMAS formula)
+  - Here n is number of items; `p_best` like 0.05.
+
+For bin packing, define objective `f` as:
+- primary: number of bins
+- secondary: slack
+Use a scalarization like:
+- `f = bins + slack/(C*n)` (very small tie-breaker)
+Then smaller f is better.
+
+Because computing the exact formula may be finicky, a robust practical variant:
+- maintain `tau_max` proportional to `1/(bins - lb + 1)`
+- set `tau_min = tau_max / a` with `a` in [50, 200]
+- periodically re-normalize if stagnation is detected.
+
+### 2.3 Stagnation detection and re-initialization
+If no improvement in global-best for `S` iterations (e.g., 200):
+- partially reset pheromones toward initial values:
+  - `tau = 0.5*tau + 0.5*tau_init`
+This is a standard ACO anti-stagnation mechanism and keeps search productive for long time limits.
+
+---
+
+## 3) Redefine deposit to match *bin groupings*
+### 3.1 Deposit on co-occurrence pairs
+From a constructed solution with bins `B1..Bk`, deposit pheromone for pairs within each bin:
+- For each bin list `B` of size m:
+  - for all `i<j` in B: `tau_pair[i][j] += Δ`
+Also deposit to `tau_open[seed]` for the first item in the bin (optional).
+
+This teaches “these items pack well together”, which is what reduces bin count.
+
+### 3.2 Deposit strength based on improvement over LB
+Quality/Δ should strongly separate k bins vs k+1 bins.
+Use something like:
+- `gap = bins - lb`
+- `Δ = Q / (1 + gap)^p` where `p` in [1.5, 3]
+- Optionally multiply by a slack term: `* (1 + (avg_fill/C))`.
+
+Keep Q small enough to not instantly saturate τ.
+
+### 3.3 Avoid O(m²) explosion for large bins
+Worst-case pairs per bin is O(m²). In bin packing, bins are usually moderate, but still:
+- If `m > m_cap` (say 25), deposit only for:
+  - pairs involving the heaviest t items in the bin, or
+  - a random subset of pairs.
+This keeps runtime stable.
+
+---
+
+## 4) Improve heuristics with *feasibility-aware* guidance (still constructive ACO)
+These are not “extra local search”; they are heuristics used during ACO construction.
+
+### 4.1 Seed selection heuristic (starting a bin)
+Choosing a good seed matters. Use combined criterion:
+- prefer large items (as usual)
+- but also prefer items that have many compatible partners by pheromone
+Score for seed i:
+- `(tau_open[i]^alpha_open) * (w[i]/C)^beta_seed * (avg top pher(i,·))^gamma`
+Candidate seeds: top-K remaining + some random.
+
+### 4.2 Add “look-ahead tightness” for remaining capacity
+When picking next item j to add into a bin with remaining capacity R:
+- prefer j that leaves a remainder `R-w[j]` that is likely fillable.
+Approximate fillability by checking if any remaining item fits exactly (or nearly) into the remainder.
+This can be done cheaply:
+- keep a multiset-like count by weight (dict weight→count)
+- then check if remainder exists; else check nearest smaller weight presence.
+This is a big win near the optimum where “one awkward leftover” forces a new bin.
+
+### 4.3 Deterministic closure rule
+If at any point an item exactly fits remaining capacity, pick it immediately (short-circuit). This reduces randomness where it’s not helpful.
+
+---
+
+## 5) Make the implementation faster per constructed solution (more ants/iterations in same time)
+Even with 100 seconds max wall time, more constructions improves best-of-run.
+
+### 5.1 Data structure changes
+- Replace `remaining=set(...)` with:
+  - `unpacked = [True]*n`
+  - `remaining_list = [...]` plus a counter; remove by swap-pop using an index map if you need O(1) deletions.
+- Maintain `count_by_weight` as dict for quick remainder checks.
+- Avoid recomputing `items.index` anywhere (you already noted this).
+
+### 5.2 Bin representation
+During construction you only need:
+- current bin list
+- remaining capacity
+You do not need to maintain all bin weights during selection except when finalizing.
+
+### 5.3 Time checks granularity
+Check time:
+- once per bin completion, and
+- every X item insertions (e.g., every 32 selections)
+Not every loop iteration; reduce overhead.
+
+---
+
+## 6) Iteration structure and budgeting
+You must use a fixed iteration count; time limit can cut it short.
+
+### 6.1 Choose a higher fixed max_iter and adapt ants_per_iter
+- Set `max_iter` high (e.g., 50_000) to allow long runs.
+- Compute `ants_per_iter` from n (and keep it fixed during the run):
+  - n<=200: 24
+  - 200<n<=800: 16
+  - else: 10
+Because each ant will be faster after refactor, this increases sampling.
+
+### 6.2 Elite strategy
+- Track global-best.
+- Every iteration: deposit from iteration-best.
+- Every 5 iterations: deposit from global-best with stronger factor.
+- If stagnating: partial reset (section 2.3).
+
+---
+
+## 7) Baselines and bounds (to reduce ratio)
+### 7.1 Stronger lower bound for quality scaling (still safe)
+You currently use `ceil(sum/C)` only. Use a standard stronger LB for 1D BPP:
+- **L2 / L3-type bound** (Martello-Toth style) is best but complex.
+- Implementation-ready compromise: compute an **“expanded” LB** using counts of large items:
+  - Let S be items > C/2: they each require a bin ⇒ LB2 = count(S) + ceil(sum(others)/C)
+  - Also handle items > C/3 with pairing constraints (lightweight): count items in (C/3, C/2] and approximate limited pairing with >C/2.
+Even LB2 alone improves gap computation and pheromone scaling.
+
+Important: This does not change objective, only normalizes quality and helps ACO focus on true improvements.
+
+### 7.2 Use best-known heuristic initial solution
+Keep your greedy packing, but upgrade to a standard strong one:
+- **Best-Fit Decreasing (BFD)** is fine; ensure it’s implemented efficiently.
+- This provides a better starting best, improving early deposits.
+
+---
+
+## 8) Output reconstruction and validation
+- Store packing internally in sorted-position indices; map to original indices at the end.
+- Always recompute `bin_weights` from original `weights` for safety (as you do).
+- Validate feasibility quickly in debug mindset (but don’t add heavy checks in production loop).
+
+---
+
+## 9) Concrete acceptance criteria / expected effect
+- The key metric (bins/LB) improves mostly by reducing “+1 bin” outcomes.
+- The pairwise pheromone will learn stable co-pack patterns (e.g., heavy items with specific complements), which order-pheromone cannot represent well.
+- MMAS bounds + stagnation reset should prevent early convergence and keep improving throughout the full time budget.
+
+---
+
+## 10) Implementation sequence (step-by-step)
+1) Refactor preprocessing (sorted positions, mapping).
+2) Implement strong BFD baseline and improved LB2.
+3) Implement new constructive ant: bin-by-bin filling with candidate lists, remainder look-ahead, exact-fit short-circuit.
+4) Implement pheromones: `tau_pair` (+ optional `tau_open`), init values.
+5) Implement MMAS evaporation/deposit with bounds; add stagnation detection/reset.
+6) Main loop with fixed `max_iter`, periodic time checks, iteration-best/global-best updates.
+7) Final mapping and return formatting.
+
+This plan stays within ACO as the primary method (constructive ACO + MMAS) and should materially improve solution quality under the same (or larger) time budgets by aligning pheromone learning with the bin-packing structure rather than a global permutation.

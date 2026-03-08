@@ -1,0 +1,209 @@
+Implementation-ready improvement plan
+
+A. Change the pheromone representation to reduce symmetry noise
+
+A1) Replace tau[item][bin_slot] with tau_pair between items (compatibility pheromone)
+- Maintain pheromone on item pairs indicating they “belong together”. This is common in grouping/partitioning ACO variants and is far more stable than bin-slot indices.
+- Data structure:
+  - For large n, a full n×n matrix is too big. Use sparse pheromone:
+    - Precompute, for each item i, a candidate neighbor list N(i) of size L (e.g., 30–80) consisting of items whose weights are complementary: items j with w[i]+w[j] <= C and with smallest |(w[i]+w[j]) - C| (closest to filling a bin), plus some random feasible neighbors for exploration.
+    - Store tau as dict-of-dicts: tau[i][j] only for j in N(i). Symmetric updates.
+  - Initialize tau_ij = tau0 for all stored pairs.
+- Why it helps:
+  - Pheromone now reinforces actual co-occurrence inside bins, independent of bin numbering.
+  - Encourages tight combinations (pairs/tuples) that reduce bin count.
+
+A2) Add a lightweight “residual class” pheromone as a second channel (optional but strong)
+- Maintain tau_res[item][r_class] where r_class discretizes remaining capacity when placing item.
+  - Example: classes = 0..B-1 where B=20; r_class = int((rem/C)*B).
+- This is stable and cheap, and guides whether an item is better used to “finish” bins (small rem) or start bins (large rem).
+- Final desirability combines pairwise support from items already in a bin + residual guidance.
+
+B. Improve solution construction (still ACO construction, but with better scoring)
+
+B1) Construct bins one-by-one (set-partition style) instead of item-by-item into many bins
+- New construction procedure per ant:
+  1) Maintain set U of unpacked items.
+  2) While U not empty:
+     a) Select a seed item s from U using a rule biased by weight (heavier first but stochastic): probability ∝ (w[s]/C)^p with p≈2 plus pheromone-based preference (e.g., higher historical co-occurrence sums).
+     b) Start a new bin with s; rem = C - w[s].
+     c) Repeatedly add an item x from feasible candidates in U with w[x] <= rem, chosen by roulette using:
+        score(x) = (tau_support(x, current_bin_items)^alpha) * (eta(x, rem)^beta) * (tau_res[x][class(rem)]^gamma)
+        - tau_support: aggregate pair pheromone between x and items already in the bin, e.g. sum or average of tau[min(x,y)][max(x,y)]. Use only stored edges; missing edges treated as tau_min.
+        - eta: heuristic for tight fill, e.g. 1/(1+(rem-w[x])) or exp(-k*(rem-w[x])); add a mild preference for using large items earlier in bin.
+     d) Stop adding when no feasible items.
+  3) Output packing.
+- Candidate restriction:
+  - For step (c), build candidate list as union of:
+    - Top K1 items closest to rem (best fit by weight),
+    - Top K2 items with highest tau_support to current bin,
+    - plus a small random sample K3 from feasible U to avoid stagnation.
+  - Typical: K1=10, K2=10, K3=5.
+- Why it helps:
+  - Directly builds cohesive groups; pairwise pheromone is immediately meaningful.
+  - Reduces the “open new bin” decision complexity; you always open a bin, but learn how to fill it well.
+
+B2) Add a controlled “bin closing” bias
+- When rem becomes small (e.g., rem <= 0.15C), boost items that exactly/tightly fit.
+- Implement by increasing beta or by multiplying eta by (1 + close_bonus*(1 - rem/C)).
+
+B3) Maintain feasibility and speed
+- Keep U as a boolean array + list of remaining items; but you need fast feasible selection.
+- Pre-sort items by weight and maintain buckets by weight to quickly get best-fit candidates:
+  - Create lists of items for each weight value if weights are small-ish; otherwise use sorted list of remaining items and scan near rem.
+  - Practical approach without heavy data structures:
+    - Keep remaining items in a list; for best-fit candidates, scan a window of the sorted-by-weight remaining items using two pointers updated lazily.
+    - Since this is offline, weights list is fixed; maintain an “unused” boolean and reuse global arrays; accept some scanning but cap it.
+
+C. Upgrade to a stronger ACO variant: MMAS (Max–Min Ant System)
+
+C1) Use MMAS pheromone bounds and best-so-far updates
+- After each iteration:
+  - Evaporate: tau = (1-rho)*tau.
+  - Deposit only from iteration-best OR best-so-far, with a schedule:
+    - Early: deposit iteration-best to explore.
+    - Later: deposit best-so-far more often (or always) to intensify.
+- Enforce tau_min and tau_max:
+  - tau_max = 1 / (rho * cost(best_so_far)) scaled; in bin packing cost can be (k - lb + 1) or k.
+  - tau_min = tau_max * (1 - p_best^(1/n_effective)) / ((avg_degree-1)*p_best^(1/n_effective)) (standard MMAS formula), but you can use a simpler robust rule:
+    - tau_min = tau_max / a where a ~ 50..200.
+- Apply bounds after evaporation+deposit.
+
+C2) Define a cost function tightly aligned with bin minimization
+- Current secondary leftover is weak; instead:
+  - Primary: k
+  - Secondary: number of “wasted bins” measured by count of bins with fill < 0.7C (or sum of squared slack). This correlates with potential to reduce k.
+- Use cost in pheromone strength:
+  - Q = 1 / (k - lb + 1)
+  - Multiply by (1 / (1 + slack_score))
+  - Deposit strength = Q0 * Q.
+
+C3) Stagnation detection and pheromone restart (standard in MMAS)
+- Track iterations since last improvement of best_k.
+- If no improvement for S iterations (e.g., 30–80 depending on n):
+  - Reset all tau to tau0 (or partially reset towards tau0), keep best solution.
+  - This is ACO-standard and helps escape early convergence.
+
+D. Make deposits correspond to what pheromone represents
+
+D1) Pairwise deposit
+- For each bin in the deposited solution, for each pair (i,j) inside the bin:
+  - if j in N(i) (stored), tau[i][j] += strength.
+- Complexity: O(sum bin_size^2). Control it:
+  - Only deposit for pairs involving the first M items in the bin (largest weights) or only adjacent pairs in a sorted-by-weight bin ordering.
+  - Practical compromise:
+    - Sort items in bin by weight descending.
+    - For each item i, deposit with up to P partners following it (P=5..10). This approximates clique reinforcement while staying fast.
+
+D2) Residual-class deposit (if using tau_res)
+- While reconstructing deposit, simulate the bin fill order used in construction (store order per bin), and deposit tau_res[item][class(rem_before_placing_item)] += strength2.
+- If you don’t store order, approximate by placing heavier-first in that bin.
+
+E. Parameter and schedule changes tuned to use full time budget
+
+E1) Iteration count and ants should be time-adaptive but still “fixed iterations”
+- Hard requirement says fixed number of iterations of your choosing; you can still choose a high iter_cap and rely on time checks.
+- Set iter_cap high (e.g., 2000–10000 depending on n). You will exit on time.
+- Ant count:
+  - Use smaller ants but more iterations for better online learning:
+    - n<=200: ants=30
+    - n<=600: ants=20
+    - else: ants=14
+
+E2) Time-check granularity
+- Check time:
+  - Once per iteration
+  - And inside each ant every few bins created (not every item) to reduce overhead.
+
+E3) Dynamic alpha/beta
+- Early exploration: lower alpha, higher beta (heuristic-driven), e.g. alpha=0.6, beta=3.5.
+- Later exploitation: alpha increases to 1.2, beta drops to 2.5.
+- Implement linear schedule by iteration number (it/iter_cap), but since you may stop early on time, also compute schedule based on elapsed_time / time_limit.
+
+F. Improve baselines and bounds (still within ACO)
+
+F1) Stronger initial solution than plain FFD
+- Use a multi-start deterministic heuristic ensemble to seed best_so_far before ACO:
+  - Run 5–20 variants quickly:
+    - FFD
+    - Best-Fit Decreasing
+    - First-Fit with random tie-breaking
+    - “FFD with lookahead”: when multiple bins feasible, choose one minimizing (rem-wi) and also encouraging rem close to some existing item weights.
+- This does not change algorithm family; it’s initialization.
+
+F2) Use a stronger lower bound for gap calculation
+- Keep simple lb = ceil(sum/C), but also compute LB2 using a classic bin packing bound:
+  - L2: sum of largest items > C/2 each needs its own bin plus packing of the rest; and/or
+  - “dual feasible function” style is complex; instead implement:
+    - Count items > C/2: m
+    - Remaining sum Srem; lb2 = m + ceil(Srem/C)
+  - lb = max(lb, lb2)
+- Better lb improves pheromone strength scaling and stagnation detection.
+
+G. Output normalization and correctness
+- Ensure packing uses original indices (you already do).
+- Ensure bin_weights aligned.
+- Ensure no empty bins.
+
+H. Step-by-step implementation outline (how to modify your current code)
+
+H1) Preprocessing
+1) Keep order = indices sorted by decreasing weight.
+2) Compute improved lb with “>C/2” enhancement.
+3) Build neighbor lists N(i):
+   - For each i in order:
+     - Collect candidate js among items with w[j] <= C-w[i].
+     - Prefer those minimizing |(w[i]+w[j]) - C|.
+     - Add random feasible js until size L.
+   - Store only j>i to keep symmetry simple.
+
+H2) Pheromone structures
+- tau_pair: list of dicts, length n; tau_pair[i][j]=tau0 for j in N(i).
+- Optional tau_res: list of lists size n×B (B=20), init tau0_res.
+
+H3) Construction per ant (bin-by-bin)
+- Initialize unused boolean array.
+- While items remain:
+  1) choose seed s among top remaining heavy items (e.g., pick among first 10 remaining in decreasing order with roulette using weight^p).
+  2) current_bin=[s], rem=C-w[s], mark used.
+  3) loop:
+     - Build feasible candidates:
+       a) best-fit list: scan remaining items to find those with w<=rem and minimal rem-w.
+       b) pheromone list: among remaining items that are in N(y) for some y in current_bin, accumulate tau_support.
+       c) random feasible sample.
+     - Compute score and roulette pick.
+     - If none feasible: break.
+     - Add chosen item; update rem; continue.
+- Return packing, bin_weights.
+
+H4) Solution evaluation
+- key = (k, slack_score)
+  - slack_score = sum((C-fill)^2 for each bin) or count bins with fill<0.7C.
+
+H5) MMAS update
+Per iteration:
+1) evaporate all stored tau_pair edges (dict entries) by (1-rho), clamp to [tau_min,tau_max] after deposits.
+2) Choose deposit solution:
+   - if improved this iteration: iteration-best
+   - else: best-so-far with probability p_elite (e.g., 0.7) else iteration-best (keeps exploration)
+3) strength = Q / (k - lb + 1) * adjust(slack_score)
+4) deposit pairs using limited partners P per item per bin.
+5) clamp.
+6) stagnation restart if needed.
+
+H6) Budget usage
+- Set iter_cap high; time checks will stop at limit.
+- Ensure inner loops are efficient (avoid per-item time.time calls).
+
+I. Expected impact on your reported metrics
+- Pairwise pheromone + bin-by-bin construction typically yields noticeably better closure of bins, especially reducing the “+1 bin” cases that drive ratios like 1.02–1.04.
+- MMAS bounds + restart reduces premature convergence and uses the full 40–100s to keep finding occasional improvements.
+- Stronger LB and slack-based secondary objective improve the search signal, making deposits reward configurations that are more likely to later reduce bin count.
+
+J. Validation checklist
+- Verify feasibility (no bin exceeds C).
+- Verify all items placed exactly once.
+- Verify determinism only where intended (random module only; no seeding).
+- Benchmark: compare against your current average ratio; track (bins-lb) distribution to ensure fewer +1/+2 outcomes.
+
+If you want one “minimal-change” alternative (lower risk) while keeping item→bin-slot tau, the key fixes would be: canonicalize bins after construction (sort bins by fill descending then by smallest item index) before depositing, and deposit on item→(canonical bin rank). That reduces symmetry noise without changing representation. However, the pairwise model above is the higher-upside improvement.

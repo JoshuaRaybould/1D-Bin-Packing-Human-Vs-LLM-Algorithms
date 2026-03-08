@@ -1,0 +1,4 @@
+time_sec,bins_used,optimal_bins,extra_bins,overall_ratio,num_instances,optimal_hits,avg_ratio,num_items,algorithm
+38.52802585696918,10048,9616,432,1.0449251247920133,20,0,1.0394188618110451,800,ant_colony_optimisation_0_initial
+41.360439986980055,9921,9616,305,1.0317179700499168,20,0,1.0277496695378712,800,ant_colony_optimisation_0_post_plan
+40.16732603797573,9897,9616,281,1.0292221297836939,20,0,1.0254477030401214,800,ant_colony_optimisation_0_performance_4

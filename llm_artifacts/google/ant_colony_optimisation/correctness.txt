@@ -1,0 +1,20 @@
+ant_colony_optimisation_0_initial : RUNTIME_ERROR: ValueError: not enough values to unpack (expected 4, got 2)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/joshua/Documents/fyp/jxr133/llm_artifacts/google/ant_colony_optimisation/responses/ant_colony_optimisation_0_initial.py", line 168, in solve
+    for bin_idx, prob, _, pher_idx in normalized_probs:
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: not enough values to unpack (expected 4, got 2)
+ant_colony_optimisation_0_correctness_1 : Time limit given to the algorithm was not respected.
+ant_colony_optimisation_0_correctness_2 : INVALID_OUTPUT: solve must return a dict with keys 'packing' and 'bin_weights'.
+ant_colony_optimisation_0_correctness_3 : INVALID_ANSWER: weight of instance differs to sum of bin weights
+ant_colony_optimisation_0_correctness_4 : Time limit given to the algorithm was not respected.
+ant_colony_optimisation_0_initial : RUNTIME_ERROR: ValueError: not enough values to unpack (expected 3, got 2)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/joshua/Documents/fyp/jxr133/llm_artifacts/google/ant_colony_optimisation/responses/ant_colony_optimisation_0_initial.py", line 124, in solve
+    packing, bin_weights, items_packed_order = construct_solution()
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: not enough values to unpack (expected 3, got 2)
+ant_colony_optimisation_0_initial : CORRECT
+ant_colony_optimisation_0_post_plan : CORRECT
+ant_colony_optimisation_0_performance_3 : Time limit given to the algorithm was not respected.
+ant_colony_optimisation_0_performance_4 : CORRECT

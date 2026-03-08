@@ -1,0 +1,18 @@
+variable_neighbourhood_search_0_initial : CORRECT
+variable_neighbourhood_search_0_post_plan : CORRECT
+variable_neighbourhood_search_0_performance_3 : CORRECT
+variable_neighbourhood_search_0_performance_4 : CORRECT
+variable_neighbourhood_search_1_initial : CORRECT
+variable_neighbourhood_search_1_post_plan : TIME: algorithm used too little time of the time budget. Took: 0.09112985199317336, Time budget: 40 (for 20 instances). This means when given a time limit, the algorithm terminates much before the time is reached.
+variable_neighbourhood_search_1_performance_3 : TIME: algorithm used too little time of the time budget. Took: 0.08707099700404797, Time budget: 40 (for 20 instances). This means when given a time limit, the algorithm terminates much before the time is reached.
+variable_neighbourhood_search_1_performance_4 : Time limit given to the algorithm was not respected.
+variable_neighbourhood_search_2_initial : CORRECT
+variable_neighbourhood_search_2_post_plan : CORRECT
+variable_neighbourhood_search_2_performance_3 : RUNTIME_ERROR: IndexError: list index out of range
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/joshua/Documents/fyp/jxr133/llm_artifacts/anthropic/variable_neighbourhood_search/responses/variable_neighbourhood_search_2_performance_3.py", line 429, in local_search
+    item_b_val = bins[b1][i1b]
+                 ~~~~~~~~^^^^^
+IndexError: list index out of range
+variable_neighbourhood_search_2_performance_4 : CORRECT
+variable_neighbourhood_search_0_initial : best 1.0202033745038122

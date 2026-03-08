@@ -1,0 +1,120 @@
+## Detailed Implementation Plan
+
+### 1. Switch Decoding from First Fit to Best Fit Decreasing (BFD)
+
+**Change `decode_packing`** to use Best Fit instead of First Fit:
+- For each item in the permutation order, find the bin where it fits AND has the minimum remaining capacity (i.e., tightest fit).
+- This produces fewer wasted spaces and typically fewer bins.
+- Implementation: For each item, iterate all bins, track the bin with minimum remaining capacity that still fits the item. Place in that bin, or open a new bin if none fits.
+
+### 2. Time-Based Main Loop
+
+**Replace fixed 1000 iterations** with a time-based loop:
+- Use `while time.time() - start_time < time_limit * 0.95:` as the outer loop.
+- This ensures the algorithm uses the full time budget (up to 100s).
+- Track iteration count internally for adaptive parameter calculations using `iteration / estimated_max_iterations` or use elapsed fraction `(time.time() - start_time) / time_limit`.
+
+### 3. Improved Initial Population
+
+**Generate diverse high-quality initial solutions:**
+- Agent 0: FFD ordering (sorted descending by weight), decoded with BFD.
+- Agent 1: BFD-specific ordering (same descending sort, but the BFD decode does the work).
+- Agents 2-5: Perturbations of FFD ordering with small random segment reversals (2-5 swaps).
+- Agents 6 to pop_size//3: Semi-random permutations (descending sort + random swaps proportional to n).
+- Remaining agents: Fully random permutations.
+- Population size: `min(30, max(10, n // 2))` — smaller population for more iterations.
+
+### 4. Improved Fitness Function
+
+**Use enhanced Falkenauer fitness with k=2:**
+- `fitness = num_bins - sum((load/C)^2 for load in bin_loads) / num_bins`
+- This is the current approach but ensure it's computed correctly.
+- Additionally, for tie-breaking when num_bins is equal, the fill_score with k=2 is sufficient.
+- Consider using k=3 for stronger differentiation: `sum((load/C)^3) / num_bins`.
+
+### 5. Improved FDO Movement Operators
+
+**5a. Scout behavior (exploration — high weight ratio):**
+- Instead of pure random swaps, use structured perturbations:
+  - With probability 0.5: Apply segment reversal (reverse a random subsequence of length proportional to `normalized_fi * n * 0.3`).
+  - With probability 0.3: Apply block insertion (remove a random block of items and reinsert at a random position).
+  - With probability 0.2: Apply random swaps (current behavior, as fallback).
+- The number/size of perturbations scales with `normalized_fi` (worse agents get larger perturbations).
+
+**5b. Forager behavior (exploitation — low weight ratio):**
+- Use Order Crossover (OX) with the best permutation instead of position-based crossover:
+  - Select two random crossover points in the best permutation.
+  - Copy the segment between those points from the best permutation to the new permutation.
+  - Fill remaining positions with items from the current permutation in their relative order.
+  - The segment size is proportional to `copy_rate = max(0.1, min(0.5, normalized_fi * 0.6))`.
+- After crossover, apply 1-3 adjacent swaps as micro-perturbation (not local search, just slight noise to avoid identical copies).
+
+### 6. Improved FDO Weight Calculation
+
+**Align with FDO paper more closely:**
+- `weight_i = fitness_i / fitness_best` (current approach, keep this).
+- Scout threshold: `weight > 1.0 + r` where `r = random.random()` — keep this but make the threshold adaptive:
+  - Early iterations: threshold = `1.0 + 0.5 * random.random()` (more scouts, more exploration).
+  - Late iterations: threshold = `1.0 + 1.5 * random.random()` (fewer scouts, more exploitation).
+  - Use `progress = elapsed_time / time_limit` to interpolate: `threshold = 1.0 + (0.5 + progress) * random.random()`.
+
+### 7. Adaptive Reinitialization
+
+**Replace periodic reinitialization with stagnation-based:**
+- Track `last_improvement_time`.
+- If no improvement for `stagnation_threshold` iterations (e.g., 50 iterations or 10% of elapsed time), reinitialize worst 30% of population.
+- Reinitialized agents: half are perturbations of the global best (5-15 random swaps), half are semi-random permutations.
+- This focuses diversity injection when it's needed.
+
+### 8. Elitism
+
+**Preserve the best solution explicitly:**
+- Always keep the best-found permutation stored separately (already done with `best_perm`).
+- After reinitialization, replace one reinitialized agent with the current best permutation.
+- Never modify the agent at `curr_best_idx` during an iteration (already done with `continue`).
+
+### 9. Speed Optimizations
+
+**9a. Faster BFD decode:**
+- Pre-compute weights lookup to avoid repeated indexing.
+- Use simple list scanning for best fit (avoid unnecessary object creation).
+- Track bin count and use early termination if current packing already equals the lower bound.
+
+**9b. Lower bound computation:**
+- Compute L2 lower bound (sum of weights / capacity, rounded up) at the start.
+- If any solution achieves this lower bound, stop immediately — no further improvement possible.
+
+**9c. Reduce unnecessary copies:**
+- Avoid `[:]` copies of permutations when not needed.
+- Only copy when a new best is found.
+
+### 10. Implementation Structure
+
+```
+solve(bin_capacity, weights, time_limit):
+  1. Handle edge cases (n=0, n=1)
+  2. Compute lower bound = ceil(sum(weights) / bin_capacity)
+  3. Define decode_bfd(perm) -> bins, bin_loads
+  4. Define fitness(perm) -> score, bins, bin_loads
+  5. Generate initial population (as described in §3)
+  6. Evaluate all initial agents, track best
+  7. If best == lower_bound, return immediately
+  8. Main FDO loop (time-based, §2):
+     a. Find current best in population
+     b. For each non-best agent:
+        - Compute weight and threshold (§6)
+        - Apply scout or forager operator (§5)
+        - Evaluate new permutation
+        - Greedy accept (or probabilistic accept for diversity)
+        - Update global best; if equals lower bound, return
+     c. Check stagnation, reinitialize if needed (§7)
+  9. Build and return result from best_bins, best_bin_loads
+```
+
+### Expected Impact
+
+- **BFD decode**: ~1-2% improvement in packing quality over FF.
+- **Better operators**: More structured exploration and exploitation should find better permutation orderings.
+- **Full time utilization**: Using up to 100s instead of stopping at 38s gives ~2.5x more search time.
+- **Lower bound early termination**: Saves time on easy instances.
+- **Combined target**: Reduce average ratio from 1.0277 to ~1.01-1.015.

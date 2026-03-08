@@ -1,0 +1,199 @@
+## 1) Keep the GA skeleton, but change what a chromosome means
+### 1.1 Switch from “pure permutation” to **random-keys with bias** (still a GA chromosome)
+- **Chromosome**: list[float] keys of length n. Sorting by key yields an order. (Equivalent to permutation, but mutations become smoother and crossovers less disruptive.)
+- **Initialization**: keys derived from decreasing weight plus noise:
+  - `key[i] = rank(i)/n + U(-σ, σ)` where rank is position in sorted-by-weight order; σ around 0.05–0.15 depending on n.
+  - Also include fully random keys for diversity.
+- **Why**: OX on permutations is often too disruptive for bin packing; random keys allow blend crossover and small perturbations that preserve useful partial ordering.
+
+### 1.2 Add a **second gene** per item: “placement preference”
+- Store two floats per item: `(order_key, fit_key)`.
+- Decoder uses `order_key` for the item sequence, and `fit_key` to break ties among candidate bins (see decoder section).
+- This still fits GA family and improves expressiveness without introducing non-GA local search.
+
+Implementation note: you’ll hold two parallel lists of floats or one list of tuples; mutation/crossover acts on both.
+
+---
+## 2) Replace the decoder with a stronger, still-fast greedy family
+Your decode is currently: process items in order, place by Best-Fit scanning all bins. Improve it along two dimensions: (A) better bin choice, (B) better data structure.
+
+### 2.1 Use **Best-Fit with candidate lists (residual buckets)** to avoid scanning all bins
+- Maintain bins by residual capacity `r = C - bw`.
+- Use a structure like `buckets[0..C]` (list of bin indices by residual) if C is not too large; but C can be big.
+- More robust: maintain **sorted list of (residual, bin_id)** via `bisect` on an array of residuals. Update per placement:
+  - Find smallest residual >= w (best fit) with `bisect_left(residuals, w)`.
+  - Remove/update that bin’s residual in O(#bins) worst-case because list delete/insert shifts; mitigate with:
+    - Using `array('i')` won’t help shifts.
+    - Better: keep **multiple lists per residual range** (“coarse buckets”), e.g., bucket size = max(1, C//2048) and within-bucket small linear scan.
+- Practical compromise (implementation-friendly, fast in Python):
+  - Keep `bins_by_rem`: dict mapping `rem_bucket -> list[bin_id]`, where `rem_bucket = rem // B`.
+  - When placing item weight w, start from bucket `w//B` upward until you find a bin that fits; within bucket choose best (min rem-w) using small scan.
+  - Periodically rebuild buckets (every K placements) to avoid drift.
+
+This reduces decode from O(n·m) toward ~O(n·(avg bins in few buckets)).
+
+### 2.2 Use **Best-Fit-Decreasing variants with controlled tie-breaking**
+When multiple bins fit similarly, pick using the chromosome’s `fit_key` plus structural heuristics:
+- Primary: minimize residual after placement.
+- Secondary (tie-break): prefer bins with:
+  - higher current load (stabilizes dense bins),
+  - or lower index (reproducibility),
+  - and include `fit_key[idx]` to bias consistent choices across decodes.
+
+### 2.3 Add a standard packing improvement inside decoding: **“open-bin choice” policy**
+A big weakness is when greedy opens a new bin too early.
+- If no existing bin fits, before opening a new bin, attempt a limited alternative:
+  - Check the **top K heaviest remaining items** (or next K items in order) to see if swapping order would allow fit into an existing bin.
+  - This is still part of the decoder (constructive heuristic), not a separate local search.
+- Keep K tiny (e.g., 3–6) and only trigger when opening a new bin.
+
+### 2.4 Multi-decoder evaluation per chromosome (cheap diversification)
+For each chromosome, compute fitness as the best of 2–4 decodes:
+- Decoder variants differ only by bin-selection tie-break and/or “first-fit vs best-fit” and/or minor randomization.
+- Use deterministic pseudo-randomness driven by `fit_key` (not random module) so evaluation is stable across generations (reduces noise in GA selection).
+- Keep count small (2 for large n, 4 for small n) to control runtime.
+
+---
+## 3) Improve the fitness to better correlate with fewer bins
+Current fitness: `bins - 1e-3 * sum(fill^2)`; this is weak and sometimes misleading.
+
+### 3.1 Use lexicographic fitness packed into a float (still sortable)
+Minimize primarily bins, then minimize “waste pattern”:
+- `m = #bins`
+- Let `waste = sum(C - bw)` (total unused capacity)
+- Let `max_waste = max(C - bw)` and `waste_sq = sum((C-bw)^2)`
+- Fitness:
+  - `fitness = m + 1e-4*(waste/C) + 1e-7*(waste_sq/(C*C)) + 1e-6*(max_waste/C)`
+Pick epsilons so that any 1-bin improvement dominates all secondary terms.
+
+### 3.2 Add a “critical bin count pressure” term
+To specifically push toward eliminating one bin, penalize having many bins with large slack:
+- Count bins with slack >= median slack or slack >= C/4.
+- Add tiny penalty proportional to that count.
+
+This helps the GA prefer structures that are easier to merge later.
+
+---
+## 4) Replace OX crossover with operators that preserve relative weight ordering
+With random keys you can use real-coded crossovers that are standard in GA.
+
+### 4.1 Use **BLX-α or arithmetic crossover** on keys
+- Child order_key[i] = λ*p1 + (1-λ)*p2 (λ uniform in [0,1])
+- Same for fit_key.
+- Add occasional per-gene noise post-crossover (very small).
+
+### 4.2 Add a **bin-packing-aware “chunk inheritance”** crossover (still GA)
+Because bin packing structure matters, preserve groups:
+- Take one parent’s decoded best packing (store alongside fitness for elites).
+- Select a few bins from that packing (e.g., 2–6 bins) and force those items to appear early together in child by adjusting their order_keys downward.
+- Then fill rest by blended keys.
+
+This is an “educated crossover” commonly used in GA for packing: still reproduction, not local search.
+
+---
+## 5) Mutation: target the moves that change bin count
+Current swap/insertion is generic. Keep them, but add 2 targeted mutations that are still chromosome-level.
+
+### 5.1 Weight-class mutation
+- Identify percentile bands (top 10%, mid, small).
+- With some probability, perturb keys primarily within a band (swap/shift among similar weights). This changes packing without destroying heavy-item backbone.
+
+### 5.2 “Late bin disruption” mutation
+- Items that end up in the last 1–2 bins in the decoded solution are often responsible for extra bins.
+- For a subset of offspring, after a fast decode, take items from the worst-filled bins and perturb their order_keys to earlier positions.
+- Keep it cheap: only do this for (a) elites’ mutated copies, or (b) every X generations.
+
+This uses decode feedback but remains a GA mutation/education step (memetic GA style), not a separate iterative local search.
+
+---
+## 6) Selection, replacement, and population management
+### 6.1 Use **steady-state GA** or reduce full re-evaluation costs
+Full generational replacement forces evaluating pop_size every generation.
+- Switch to steady-state: each iteration creates k children, evaluates them, and replaces k worst (or worst among a random subset).
+- Benefits: more iterations per second, faster reaction to improvements, and you can spend time budget continuously.
+- Fixed iteration requirement: define `iterations = fixed_num_steps` where each step produces, evaluates, and inserts exactly one child (or a small batch).
+
+### 6.2 Diversity control beyond immigrants
+Immigrants at 5% may be too weak/too random.
+- Replace “pure random immigrants” with **biased random-keys** immigrants:
+  - Start from base decreasing order plus larger noise, and random fit_keys.
+- Track similarity: approximate via Kendall tau is too heavy; instead use:
+  - Compare top-T items order (e.g., first 30 indices after sorting keys) hashed into a tuple.
+  - If too many duplicates, force immigrants or higher mutation.
+
+### 6.3 Adaptive mutation schedule
+- If best fitness hasn’t improved in S iterations, increase mutation amplitudes and/or immigrant rate.
+- When improvement happens, reduce mutation to exploit.
+
+---
+## 7) Caching and reuse to spend time on search, not recomputation
+### 7.1 Cache decoded results for elites
+- Store for each individual: (fitness, packing summary, bin_weights).
+- In steady-state, only new child needs evaluation; others keep fitness.
+
+### 7.2 Hash-based memoization for identical orders
+- For random keys, exact equality is rare; but for derived *order* you can hash the resulting permutation of indices for top-K only (e.g., top 64 positions) plus multiset checksum.
+- Memoize decoded result for those signatures for a short LRU (e.g., dict with manual eviction). This avoids re-decoding near-duplicates.
+
+### 7.3 Time check policy
+- Time checks inside tight loops should be periodic (every 1024 placements as you do), but ensure decode always completes unless very near limit; partial decode results can mislead selection.
+- New approach: if time is close to limit, stop producing new children rather than interrupting decode.
+
+---
+## 8) Seeding and baselines: raise the floor so GA starts nearer optimum
+### 8.1 Add multiple strong deterministic seeds
+Besides decreasing order, add:
+- Increasing order (sometimes helps with certain distributions)
+- “Decreasing with modulo classes” (group weights by weight%g or by size class)
+- A few seeds from **First-Fit Decreasing** and **Best-Fit Decreasing** decoders with different tie-breaks (converted back into keys).
+
+### 8.2 Inject lower bound information
+You’re compared to a “best known lower bound”. Use simple bounds to guide but not violate requirements:
+- Compute trivial LB: `ceil(sum(weights)/C)` and optionally `L2` bound (count items > C/2, etc.).
+- Use LB to decide intensification: when solution is within +1 bin of LB, allocate more iterations to exploitation (lower mutation, more educated crossover) because you’re close.
+
+---
+## 9) Concrete iteration budget and parameter defaults (implementation-ready)
+Given runtime can go to 100s, but caller supplies `time_limit`:
+- Use **fixed iteration count** large enough that time is the limiter, e.g.:
+  - `max_steps = 200000` (steady-state, 1 child/step) for n up to a few hundred; for very large n reduce, e.g. `max_steps = 50000`.
+- Pop size:
+  - `pop_size = clamp(40 + n//20, 50, 160)`
+- Each step:
+  1) select parents (tournament size 3–5)
+  2) crossover (90%) using blend + occasional chunk inheritance
+  3) mutate (always small noise; sometimes targeted)
+  4) evaluate with 2 decoders (or 1 if n very large)
+  5) replacement: replace worst (or worst among 5 random) unless child is duplicate of an existing signature
+  6) update best
+- Adaptive controls:
+  - stagnation window: 2000 steps (small n) / 500 steps (large n)
+  - if stagnant: increase mutation noise by 1.5× and immigrants by inserting a new individual every 50 steps.
+
+---
+## 10) Validation and expected impact
+### 10.1 Why these changes should reduce bins
+- Stronger decoder and multi-decoder evaluation finds better packings for the same order information.
+- Random-keys + blend crossover preserves beneficial relative ordering (esp. heavy items) better than OX.
+- Educated crossover/mutation uses packing structure feedback to focus on the few items that cause extra bins.
+- Steady-state reduces wasted evaluations and increases evolutionary “events” per second.
+
+### 10.2 What to measure during tuning
+- Decode time per child and children/sec.
+- Best bins over time curve: ensure improvements continue throughout the budget (not plateau at 10s).
+- Distribution of bin slack in best solution; if many bins have huge slack, decoder/tie-break needs adjustment.
+
+---
+## 11) Implementation order (safe, incremental)
+1) Refactor to steady-state GA with stored fitness and best tracking.
+2) Implement random-keys chromosome (order_key only) + blend crossover + gaussian/uniform noise mutation.
+3) Replace decoder with bucketed candidate selection (speed) while keeping best-fit semantics.
+4) Add fit_key and tie-breaking.
+5) Add multi-decoder evaluation (2 variants).
+6) Add educated chunk inheritance using parent’s decoded bins (for elites only).
+7) Add targeted “late bin disruption” mutation with small frequency.
+8) Add adaptive mutation and smarter immigrants.
+
+Each step is independently testable against current baseline.
+
+This plan stays within GA as the primary method, uses only standard library + random, respects the required signature/return format, and is oriented toward fewer bins rather than just faster execution.

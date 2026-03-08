@@ -1,0 +1,13 @@
+tabu_search_0_initial : Time limit given to the algorithm was not respected.
+tabu_search_0_correctness_1 : CORRECT
+tabu_search_0_post_plan : CORRECT
+tabu_search_0_performance_4 : CORRECT
+tabu_search_1_initial : CORRECT
+tabu_search_1_post_plan : CORRECT
+tabu_search_1_performance_3 : CORRECT
+tabu_search_1_performance_4 : CORRECT
+tabu_search_2_initial : CORRECT
+tabu_search_2_post_plan : TIME: algorithm used too little time of the time budget. Took: 8.877516860979085, Time budget: 40 (for 20 instances). This means when given a time limit, the algorithm terminates much before the time is reached.
+tabu_search_2_performance_3 : TIME: algorithm used too little time of the time budget. Took: 9.1771381730141, Time budget: 40 (for 20 instances). This means when given a time limit, the algorithm terminates much before the time is reached.
+tabu_search_2_performance_4 : CORRECT
+tabu_search_2_performance_4 : best 1.0120815659179514

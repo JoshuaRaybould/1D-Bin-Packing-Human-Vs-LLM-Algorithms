@@ -1,0 +1,134 @@
+## Detailed Implementation Plan
+
+### 1. Core Data Structure Improvement
+
+Replace the tuple-based bin representation with a more efficient structure:
+- Use `bin_remaining` as a plain list of remaining capacities (indexed by bin index)
+- Use `bin_items` as a list of lists of item indices
+- This avoids constant tuple re-creation and allows O(1) updates
+
+### 2. Faster Construction Phase using Binary Search
+
+**Use `bisect` module for best-fit search:**
+- Maintain a sorted auxiliary structure of (remaining_capacity, bin_index) pairs
+- For each item of weight `w`, use `bisect_left` to find the smallest remaining capacity >= w
+- Among candidates in the RCL range, pick randomly
+- Implementation detail: Since we need the RCL (not just best fit), maintain a sorted list. Use bisect to find the range [w, w + alpha*(max_remaining - min_valid_remaining)]. Pick randomly from that range.
+- Actually, for GRASP we need the RCL, so: find all bins with remaining >= w using bisect, compute best_val (minimum remaining - w), worst_val (maximum remaining - w), threshold = best_val + alpha*(worst_val - best_val), then filter. With sorted data, use bisect to find bins with remaining in [w, w + threshold] for the RCL.
+
+**Specific approach:**
+- Keep `bin_remaining` as a list, and for construction, iterate candidates. For very large instances (n > 5000), use a sorted container approach. For smaller instances, the linear scan is fine since it's within the time budget.
+- Actually, simplify: just use the linear scan but with list indexing (no tuple creation) for speed.
+
+### 3. Enhanced Local Search (Bin Elimination)
+
+Rewrite `local_search` with the following improvements:
+
+**Phase 1: Simple Redistribution (current approach, optimized)**
+- Sort bins by total weight ascending (lightest first)
+- For each candidate bin to empty, try to redistribute all its items to other bins using best-fit
+- Use numpy-free array operations for speed
+- Key optimization: Sort the items to redistribute by weight descending (largest first) - this is already done but ensure it's consistent
+
+**Phase 2: Enhanced Redistribution with Item Displacement**
+- When simple redistribution fails for a source bin, try displacing items:
+  - For each item `a` in source that doesn't fit anywhere, find a target bin `t` where `a` would fit if we removed some item `b` from `t` (where weight[b] < weight[a] and remaining[t] + weight[b] >= weight[a])
+  - Remove `b` from `t`, place `a` in `t`, add `b` to the remaining items to redistribute
+  - Continue until all items are placed or no progress is made
+- Limit the depth of displacement chains to avoid exponential blowup (max 3-4 levels)
+
+**Phase 3: Pair-based moves**
+- Try moving pairs of items from the source bin and fitting them into two different target bins
+- This is a generalization that can find redistributions the single-item approach misses
+
+### 4. Swap-based Local Search (Improved)
+
+Rewrite `local_search_swap` more efficiently:
+- Pre-compute for each bin: total weight, sorted item weights
+- For bin elimination attempts, use a recursive/iterative approach with backtracking (limited depth)
+- Time-box each elimination attempt: if it takes too long, skip to next candidate
+- Consider (2,1) exchanges: take 2 items from source, give 1 item to source from target
+
+### 5. Reactive GRASP Alpha Selection
+
+Replace uniform random alpha selection with reactive selection:
+- Maintain a dictionary mapping each alpha to: count of times used, sum of solution qualities
+- Every K iterations (e.g., K=10), update selection probabilities proportional to average quality
+- Quality = 1.0 / num_bins (higher is better)
+- Use roulette wheel selection based on accumulated quality
+- Start with uniform distribution for the first K iterations
+- Alpha values: [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+
+### 6. Elite Solution Pool and Path Relinking
+
+Maintain a pool of up to 5 elite solutions:
+- After each GRASP iteration + local search, if the solution is among the top 5 found, add it to the pool
+- Periodically (every 20 iterations), perform path relinking between two elite solutions:
+  - Select the best and a random elite solution
+  - Gradually transform one into the other by moving items between bins
+  - At each intermediate step, apply local search
+  - Track the best intermediate solution
+
+**Path relinking implementation:**
+- Represent solutions as item-to-bin assignments (array of length n)
+- Compute symmetric difference (items assigned to different bins)
+- Iteratively reassign items from source representation to target representation
+- After each reassignment, fix any capacity violations by opening new bins
+- Apply light local search at promising intermediate points
+
+### 7. Time Management
+
+- Remove the `iteration > 1000` cap entirely
+- Use `time_limit * 0.98` as the hard cutoff (leave 2% margin)
+- For local search, pass remaining time and check periodically
+- Allocate time budget roughly: 70% for GRASP iterations, 20% for path relinking, 10% for final intensification
+- For the final intensification phase: take the best solution found and apply the most thorough local search (bin elimination with deep swaps)
+
+### 8. Lower Bound Computation for Early Termination
+
+Compute the L2 lower bound (Martello & Toth) at the start:
+- L1 = ceil(sum(weights) / bin_capacity)
+- L2: Classify items into large (> C/2), medium, small. Compute tighter bound.
+- If current best equals lower bound, stop early (optimal found)
+
+### 9. Implementation Order and Structure
+
+```
+def solve(bin_capacity, weights, time_limit):
+    1. Setup: start_time, n, edge cases
+    2. Compute lower bound (L2)
+    3. Sort indices by weight descending
+    4. Pre-compute: sorted weights, cumulative sums
+    5. Initialize alpha tracking for reactive GRASP
+    6. Initialize elite pool (max size 5)
+    7. Run deterministic BFD (alpha=0) as initial solution
+    8. Main GRASP loop:
+       a. Select alpha (reactive)
+       b. Construct solution with RCL
+       c. Apply local_search (bin elimination)
+       d. If promising (within +2 of best), apply local_search_swap
+       e. Update best, elite pool, alpha statistics
+       f. Check for optimality (== lower bound)
+       g. Every 20 iterations, try path relinking between elites
+       h. Check time limit
+    9. Final intensification on best solution
+    10. Return formatted result
+```
+
+### 10. Specific Optimizations for Speed
+
+- In construction: avoid creating new tuples; use two parallel lists (bin_items, bin_remaining)
+- In local search: use `enumerate` and direct list indexing instead of dictionary comprehensions
+- Pre-sort items by weight for faster subset-sum-like checks
+- Use early termination in loops when time is up
+- For swap search: limit the number of target bins examined (skip bins with very little remaining capacity)
+- Cache weights[item_idx] lookups in local variables within tight loops
+
+### 11. Additional Heuristic: First Fit Decreasing Variant
+
+As an alternative construction, sometimes use First Fit Decreasing (FFD) with randomization:
+- Instead of best-fit criterion, use first-fit (assign to first bin that fits)
+- With alpha controlling the randomization of which "first" bin to use
+- This provides solution diversity in the construction phase
+
+Alternate between BFD-based and FFD-based construction (randomly choose which to use each iteration, weighted toward whichever has produced better results).

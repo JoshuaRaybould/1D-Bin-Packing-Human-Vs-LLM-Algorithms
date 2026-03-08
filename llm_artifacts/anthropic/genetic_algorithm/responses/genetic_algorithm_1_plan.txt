@@ -1,0 +1,124 @@
+## Improvement Plan: Switch to Grouping Genetic Algorithm (GGA)
+
+### 1. Change Representation from Permutation to Direct Grouping
+
+**Current**: Each individual is a permutation of item indices decoded via BFD/FFD.
+**Proposed**: Each individual is directly represented as a packing: a list of bins (each bin is a list of item indices), paired with a parallel list of remaining capacities per bin.
+
+This eliminates the expensive O(n×b) decode step on every fitness evaluation and removes the many-to-one mapping problem where different permutations yield identical packings.
+
+**Fitness** = `len(bins)` (number of bins), computed in O(1).
+
+### 2. Efficient Helper: BFD Reinsertion
+
+Implement a function `bfd_insert(bins, bin_remaining, items_to_insert)` that:
+- Sorts `items_to_insert` by weight descending
+- For each item, finds the bin with minimum remaining capacity that still fits (best-fit)
+- If no bin fits, creates a new bin
+- Modifies `bins` and `bin_remaining` in place
+
+This is used extensively in crossover and mutation. For performance, maintain `bin_remaining` alongside `bins` in each individual (stored as a tuple/pair).
+
+### 3. Population Initialization (Diverse Heuristic Seeds)
+
+Generate initial individuals using multiple strategies:
+- **FFD**: Sort items by weight descending, apply First Fit → 1 individual
+- **BFD**: Sort items by weight descending, apply Best Fit → 1 individual
+- **Random-order BFD** (×60-80% of pop): Generate random permutation, apply BFD decoding
+- **Perturbed FFD** (×5-10): Take FFD order, apply small random swaps, decode via BFD
+- Apply bin-elimination cleanup (see §6 mutation) to each initial individual once
+
+Population size: 60 for n≤100, 40 for n≤500, 30 for n>500.
+
+### 4. Crossover: Falkenauer-style Bin-Based Crossover
+
+Given parents P1 and P2:
+1. **Select donor bins from P1**: Choose k bins randomly (k = random between 1 and len(P1)//3). Prefer fuller bins (sort P1 bins by fullness descending, select from the top half with higher probability).
+2. **Copy selected bins to child**: These bins and their items go directly into the offspring.
+3. **Mark transferred items**: Create a set of all items already placed in the child.
+4. **Process P2's bins**: For each bin in P2, remove items that are already in the child. Keep the bin if it still has items.
+5. **Collect orphans**: Any items not yet placed (should be none if implemented correctly, but handle edge cases).
+6. **Result**: Child = selected P1 bins + cleaned P2 bins. Compute bin_remaining for each bin.
+
+Generate two children by swapping P1/P2 roles.
+
+### 5. Selection and Elitism
+
+- **Tournament selection**: Size 4, select two parents per mating
+- **Elitism**: Preserve top 10-15% of population unchanged into next generation
+- **Duplicate avoidance**: If a new child has the same fitness as an existing elite, still include it (different structure may lead to different evolutionary paths)
+
+### 6. Mutation Operators (Choose Randomly Per Individual)
+
+Each mutation operates directly on the grouping representation:
+
+**a) Bin Elimination Mutation (probability 0.40)**
+- Find the bin with the smallest total weight (least-full bin)
+- Remove this bin entirely; collect its items
+- Reinsert items into remaining bins using BFD
+- If reinsertion creates fewer total bins than before, great; if equal, keep for diversity; if more, revert
+
+**b) Item Move Mutation (probability 0.25)**
+- Pick a random item from a random bin
+- Remove it from its bin (delete bin if empty)
+- Find a different bin where it fits (best-fit) and place it there
+- If no bin fits, create a new bin
+
+**c) Item Swap Mutation (probability 0.20)**
+- Pick two items from two different bins
+- Check if swapping them keeps both bins feasible
+- If yes, swap them
+
+**d) Bin Merge Attempt (probability 0.15)**
+- Sort bins by remaining capacity descending
+- Try to merge the two least-full bins: move all items from one into the other
+- If total weight exceeds capacity, try BFD reinsertion of the smaller bin's items into other bins
+
+Overall mutation rate: 0.5 (applied per child after crossover)
+
+### 7. Aggressive Bin Elimination Pass
+
+After each generation, take the current best individual and attempt bin elimination mutation on it 2-3 times (targeting different least-full bins). If any attempt reduces bin count, update the best. This is part of the evolutionary process (elitist improvement within the GA), not a separate local search.
+
+### 8. Stagnation and Restart Strategy
+
+- Track generations without improvement
+- After 30 generations of stagnation:
+  - Keep top 5 individuals
+  - For remaining slots, generate new individuals: 50% from random-order BFD, 50% from heavy perturbation of best solution (shuffle 30-50% of items between bins via repeated item moves)
+- After 100 generations of total stagnation (no improvement across multiple restarts), reduce population to top 3 and fill with completely random restarts
+
+### 9. Time Management
+
+- Check `time.time()` at the start of each generation
+- Stop when elapsed ≥ 95% of time_limit
+- Every 5 generations, also check time within the offspring generation loop
+- Since there's no penalty for using more time (budget is 100s), use the full budget
+
+### 10. Final Post-Processing
+
+Before returning, take the best solution and:
+- Attempt bin elimination mutation on every bin (from least full to most full), keeping improvements
+- Try re-decoding all items via BFD in weight-descending order as a baseline comparison
+- Return whichever packing uses fewer bins
+
+### 11. Data Structure Details
+
+Each individual stored as:
+```
+{
+  'bins': list of lists of item indices,
+  'remaining': list of remaining capacities per bin,
+  'fitness': int (number of bins)
+}
+```
+
+Use deepcopy or explicit copying when creating offspring to avoid aliasing issues.
+
+### 12. Expected Impact
+
+- **Grouping representation** eliminates redundancy in search space → faster convergence
+- **Bin-based crossover** preserves good groupings from both parents → better offspring
+- **Bin elimination mutation** directly attacks the objective (reducing bin count) → more effective search
+- **Faster fitness evaluation** (O(1) instead of O(n×b) decode) → more generations per second → better solutions in same time budget
+- Combined, expect ratio improvement from 1.0247 toward 1.01 or better

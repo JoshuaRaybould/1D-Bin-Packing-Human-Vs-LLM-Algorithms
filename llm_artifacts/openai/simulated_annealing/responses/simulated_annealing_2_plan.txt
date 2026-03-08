@@ -1,0 +1,225 @@
+## 1) Data structure upgrades (enable fast, targeted SA)
+
+### 1.1 Maintain O(1) item removal positions
+- Add `pos_in_bin[item]` storing the index position of `item` inside `bins[bin]`.
+- Update `pos_in_bin` on every swap/remove/append.
+- This removes the current O(k) scans in `move_item` and `swap_items`, which are a major time sink.
+
+Implementation details:
+- `bins[b]` remains a list of items.
+- Removal uses swap-with-last:
+  - `p = pos_in_bin[i]`, `last = bins[b][-1]`, set `bins[b][p] = last`, update `pos_in_bin[last] = p`, pop.
+- On append: `pos_in_bin[i] = len(bins[b])` before `append`.
+
+### 1.2 Track active (non-empty) bins explicitly
+- Maintain `active_bins` as a list of bin indices with non-empty bins, plus `pos_active[b]` for O(1) remove.
+- This prevents scanning all bins in scoring and in candidate selection.
+
+### 1.3 Replace `remove_empty_bin` swapping logic carefully
+Current empty-bin removal swaps with last bin, which invalidates many indices and complicates rollback.
+
+Two options; pick one and stick to it:
+- **Option A (recommended): never physically delete bins during SA**
+  - Keep bins fixed; allow empties; maintain `active_bins`.
+  - At export, compact bins into packing.
+  - Pros: rollback becomes trivial, bin indices stable.
+  - Cons: more bins in arrays; but active list keeps operations fast.
+
+- Option B: keep deletion but then rollback must snapshot more often.
+
+Given you want stronger moves and less snapshotting, choose **Option A**.
+
+## 2) Objective redesign for stronger bin-count pressure (still SA)
+
+### 2.1 Score should primarily reflect number of used bins; penalties should only guide infeasible traversal
+Current score: `bins_used*M + over_sq*(M*50) + slack*0.01`.
+Weaknesses:
+- Slack term is too weak/noisy; doesn’t meaningfully guide packing tightness.
+- Over-penalty can freeze search away from helpful mild infeasibility.
+
+Plan:
+- Use a **lexicographic objective encoded as scalar**:
+  - `score = bins_used * BIG + infeas_penalty * MID + secondary`
+- Where:
+  - `bins_used = len(active_bins)`
+  - `infeas_penalty = sum(max(0, load[b]-C) for active bins)` (L1) or squared but scaled sanely.
+  - `secondary = sum((C-load[b])**2 for feasible bins)` (tightness), or `sum(slack)`.
+
+Suggested constants:
+- `BIG = 10**9` (or `n*C*10**4`, safely dominating)
+- `MID = 10**5` (enough to prefer feasibility within same bin count)
+- Secondary scaled to keep deltas in a reasonable range for exp().
+
+### 2.2 Incremental delta evaluation
+Do not recompute `score_state` by scanning all loads.
+Instead maintain:
+- `cur_bins_used`
+- `cur_infeas` (sum of overloads)
+- `cur_secondary`
+
+For each move affecting bins `a` and `b` (and maybe opening/closing):
+- Compute old contributions from those bins only.
+- Apply move tentatively (update loads and active status).
+- Compute new contributions for those bins only.
+- `delta = (new-old)`.
+
+Contribution functions:
+- `over = max(0, load-C)`
+- `sec = (C-load)**2 if load<=C else 0` (or something similar)
+
+This will increase iterations per second dramatically, which directly improves solution quality under a fixed time budget.
+
+## 3) Neighborhood redesign (make SA spend most effort on bin elimination)
+
+### 3.1 Candidate selection: focus on “problem bins”
+Replace uniform random item selection with biased sampling:
+- With probability p1: pick an item from a **least-filled bin** (candidate to eliminate) or a bin with high slack.
+- With probability p2: pick an item from an **overloaded bin** (if infeasible states allowed).
+- Else: random item.
+
+Maintain bins in buckets (or compute cheaply using a few random probes) to get:
+- `light_bin`: among K random active bins, choose min load.
+- `tight_bin`: among K random, choose max load (but <=C ideally).
+
+### 3.2 Destinations: best-of-k rather than purely random
+For a selected item i, choose destination bin as:
+- Sample K candidate bins (K=10..30 depending on n) from active bins.
+- Evaluate feasibility/score delta quickly using incremental formula.
+- Pick best candidate (or softmax by improvement) as the proposed move.
+
+This is still SA: you are just defining a smarter proposal distribution.
+
+### 3.3 Core move set (keep it SA-native)
+Keep moves but tune mix toward bin reduction:
+1) **Relocate (1-item move)** (most frequent)
+2) **Swap (1-1 swap)**
+3) **2-1 or 1-2 exchanges** (standard for bin packing local neighborhoods; still a neighborhood move within SA)
+   - Example: move item i from bin A and item j from bin B into A (or C) if it helps free a bin.
+   - Implement as: pick A as light bin, attempt to evacuate A by placing its items into other bins via small exchanges.
+4) **Destroy-repair elimination move** (see §4)
+
+Proposed probabilities (adaptive later):
+- 60% relocate
+- 20% swap
+- 15% 2-1 / 1-2 exchange
+- 5% elimination destroy/repair
+
+### 3.4 Feasibility handling: mostly feasible search with controlled infeasible excursions
+Your current code allows infeasible states but doesn’t exploit them well.
+Plan:
+- Allow infeasible but keep it rare by:
+  - proposal: prefer feasible destination; only allow infeasible destination with small probability (e.g., 5–10%) or when overloaded bins exist.
+  - scoring: use L1 overload penalty with adaptive weight (see §5.2).
+
+## 4) Stronger bin-elimination operator (large neighborhood inside SA)
+
+### 4.1 Replace “eliminate lightest bin + pure best-fit” with bounded ejection-chain repair
+Current `try_eliminate_bin`:
+- Always targets minimum load bin.
+- Reinserts via best-fit into existing bins or opens new bins, often undoing the elimination attempt.
+
+Improvement:
+- Target bins that are “easy to eliminate”: low load but containing a few large items might be hard; instead use a score:
+  - `elim_key(b) = (num_items_in_bin, load, max_item_weight)` lexicographic; pick among small `num_items` bins first.
+- During repair, use **ejection chain depth 1–2**:
+  - For each item x to place:
+    1) Try direct feasible insert into some bin (best-of-k).
+    2) If not possible, try to swap x with a smaller item y in a bin such that x fits there and y can be placed elsewhere (one extra relocation).
+    3) If still not possible, allow opening a new bin (but then elimination failed in terms of bin count; SA may still accept if secondary improves).
+
+Key constraints:
+- Keep this move bounded so it’s not too slow.
+- Implement with local temporary changes and rollback info (or do a temporary simulation then apply if accepted).
+
+### 4.2 Make elimination attempts conditional on current best
+- Only attempt elimination when `cur_bins_used <= best_bins + 1` (close to best), so you invest time when it can improve best.
+- Increase elimination probability when stagnating.
+
+## 5) SA control improvements (adaptive temperature, acceptance targeting)
+
+### 5.1 Calibrate initial temperature to observed deltas
+Instead of `T0 = C*0.5`, estimate `T0` from a short warmup:
+- Run ~500 trial proposals (without committing or with committing but not caring), collect positive deltas `d+`.
+- Set `T0` so that `exp(-median(d+)/T0) ≈ 0.6` (or target initial acceptance 0.6–0.8).
+- This makes SA scale to instance difficulty.
+
+### 5.2 Adaptive penalty weight for infeasibility
+If you allow infeasible states, the overload penalty should adapt:
+- Track fraction of time infeasible over a window (e.g., last 2000 iters).
+- If infeasible fraction > 0.2, increase penalty weight.
+- If infeasible fraction < 0.02 and search stagnates, decrease slightly to allow crossing barriers.
+
+### 5.3 Piecewise schedule + reheats tied to progress
+Replace single geometric cooling with phases (still SA):
+- Phase A (diversify): higher T, more random moves, short.
+- Phase B (intensify): lower T, elimination/exchange heavy.
+- Reheat when no improvement in `best_bins` for X iterations, but reheat to a temperature computed from recent delta stats (not fixed T0*0.25).
+
+### 5.4 Multi-start SA within the time budget (still SA primary)
+Use remaining time to run several SA runs:
+- Start from:
+  1) BFD solution
+  2) BFD with random tie-breaking
+  3) Different constructive heuristic (see §6)
+- Always keep global best feasible.
+- Each run gets a slice of iterations/time, e.g. 3–6 restarts depending on time_limit.
+
+This is still simulated annealing as the search method; you’re just restarting.
+
+## 6) Stronger initial solutions and lower bound guidance
+
+### 6.1 Build 2–3 diverse initial packings
+Alongside Best-Fit Decreasing, add:
+- First-Fit Decreasing (FFD)
+- Best-Fit Decreasing with randomized item order within equal weights (small shuffle blocks)
+- Optional: “Min-slack” heuristic that tries to maximize fill (like BFD but with best-of-k bins if many)
+
+Pick the best (fewest bins, then least slack).
+
+### 6.2 Use a running target bin count informed by LB
+You already have access to best known lower bound only via feedback, not in code. But you can compute a standard LB:
+- `LB1 = ceil(sum(weights)/C)`
+- `LB2 = max(LB1, max(count of items > C/2))`
+Use this to:
+- Intensify elimination when current bins_used is close to LB.
+- Stop early if you hit LB (optimal under these bounds) or if no improvements possible (optional, but time budget encourages continued search anyway).
+
+## 7) Iteration/time management (use full budget up to 100s)
+
+### 7.1 Increase iteration budget and make it time-driven
+Hard requirement says fixed iterations of your choosing + periodic time checks. Do:
+- Set `max_iter` large (e.g., 5–20 million depending on n) and rely on time checks to stop.
+- Check time every `time_check_period` iterations; dynamically adjust period to keep overhead low (e.g., 2000–10000).
+
+### 7.2 Two-level loop structure
+- Outer loop over restarts/phases with a per-phase iteration cap.
+- Inner SA loop as usual.
+- After each phase, if time remains, restart from best solution with a perturbation (e.g., randomly empty 1–2 bins and reinsert via greedy) and continue SA.
+
+## 8) Correctness/robustness and export
+
+### 8.1 Ensure feasibility of reported best
+- Only store `best_snapshot` when feasible.
+- At the end, always return `best_snapshot` if exists.
+- If none feasible (shouldn’t happen), run a quick repair: move items from overloaded bins into new bins (greedy) to guarantee feasibility before returning.
+
+### 8.2 Packing compaction at export
+If using stable bin indices with empties:
+- Build `packing = [bins[b] for b in active_bins]` (or scan bins and filter non-empty).
+- Compute bin_weights from maintained loads for those bins.
+
+## 9) Validation metrics to track during development
+- Iterations/sec before vs after (should rise significantly after O(1) removals + incremental deltas).
+- Acceptance rate per phase (target: 0.2–0.6 depending on phase).
+- Frequency of elimination attempts and success rate.
+- Best bins vs LB1/LB2 gap over time.
+
+## 10) Priority order (what to implement first for biggest gain)
+1) O(1) removal via `pos_in_bin` + stable bins (no deletion) + `active_bins`.
+2) Incremental scoring/delta evaluation (eliminate `score_state` scans).
+3) Smarter proposal distribution (best-of-k destinations; biased source bins).
+4) Stronger elimination operator with bounded ejection-chain repair.
+5) Adaptive temperature initialization + phased schedule + restarts.
+6) Multiple constructive initializations.
+
+These changes directly address the observed issue: you already use the full 40s but get only ~2.6% above LB; the fastest path to lower ratio is more *effective* iterations (cheaper + more targeted toward bin elimination) and stronger elimination/repair moves that can actually reduce bin count rather than only reshuffling slack.
