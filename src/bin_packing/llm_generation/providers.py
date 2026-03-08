@@ -14,7 +14,7 @@ class PerformancePlan(BaseModel):
     reasoning: str = Field(description="The reasoning behind your plan.")
     plan: str = Field(description="The plan.")
 
-MAX_TOKENS = 15000
+MAX_TOKENS = 20000
 
 openAIModel = "gpt-5.2"
 openAIClient = OpenAI()
@@ -225,6 +225,7 @@ def performanceAnthropicPrompt(algoName, prevCode, performanceMetrics, maxTime):
     return code
 
 # Google
+"""
 
 def generalGooglePrompt(systemPrompt, userPrompt):
 
@@ -313,3 +314,4 @@ def performanceGooglePrompt(algoName, prevCode, performanceMetrics, maxTime):
     code = generalGooglePrompt(systemPrompt, userPrompt)
 
     return code
+    """

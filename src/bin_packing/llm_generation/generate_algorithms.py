@@ -10,13 +10,13 @@ numCandidates = 3
 
 #We have 1 intial prompt to obtain an algorithm, 3 for fixing and improving and 2 for making and applying a plan after the first correct algorithm
 availablePrompts = 5
-
-algoNamesForFiles = ["ant_colony_optimisation", "fitness_dependent_optimiser", "greedy_random_adaptive_search_procedure", "genetic_algorithm", "simulated_annealing", "tabu_search", "variable_neighbourhood_search"]
-selected = 3
+#  "genetic_algorithm",
+algoNamesForFiles = ["ant_colony_optimisation", "fitness_dependent_optimiser", "greedy_randomised_adaptive_search_procedure", "genetic_algorithm", "simulated_annealing", "tabu_search", "variable_neighbourhood_search"]
+selected = -2
 algoName = " ".join(algoNamesForFiles[selected].split("_"))
 algoNameForFiles = algoNamesForFiles[selected]
 
-llmProviders = ["openai", "anthropic", "google"]
+llmProviders = ["openai", "anthropic"]
 chosenProvider = llmProviders[0]
 
 # File name, average ratio of alg bins to opt bins, results, code
@@ -45,8 +45,8 @@ def performanceImprovement(llmProviders, chosenProvider, name, filePath, correct
         code = providers.performanceOpenAIPrompt(algoName, code, results, performanceRuns * timePerRun)
     elif chosenProvider == llmProviders[1]: # anthropic
         code = providers.performanceAnthropicPrompt(algoName, code, results, performanceRuns * timePerRun)
-    elif chosenProvider == llmProviders[2]: # google
-        code = providers.performanceGooglePrompt(algoName, code, results, performanceRuns * timePerRun)
+    """elif chosenProvider == llmProviders[2]: # google
+        code = providers.performanceGooglePrompt(algoName, code, results, performanceRuns * timePerRun)"""
 
     with filePath.open("w", encoding="utf-8", newline="\n") as f:
         f.write(code)
@@ -85,8 +85,8 @@ for candidateNum in range(numCandidates):
         code = providers.initialOpenAIPrompt(algoName)
     elif chosenProvider == llmProviders[1]: # anthropic
         code = providers.initialAnthropicPrompt(algoName)
-    elif chosenProvider == llmProviders[2]: # google
-        code = providers.initialGooglePrompt(algoName)
+    """elif chosenProvider == llmProviders[2]: # google
+        code = providers.initialGooglePrompt(algoName)"""
     promptsUsed += 1
 
     with filePath.open("w", encoding="utf-8", newline="\n") as f:
@@ -108,8 +108,8 @@ for candidateNum in range(numCandidates):
             code = providers.correctnessOpenAIPrompt(algoName, code, error)
         elif chosenProvider == llmProviders[1]: # anthropic
             code = providers.correctnessAnthropicPrompt(algoName, code, error)
-        elif chosenProvider == llmProviders[2]: # google
-            code = providers.correctnessGooglePrompt(algoName, code, error)
+        """elif chosenProvider == llmProviders[2]: # google
+            code = providers.correctnessGooglePrompt(algoName, code, error)"""
         promptsUsed += 1
 
         with filePath.open("w", encoding="utf-8", newline="\n") as f:
@@ -119,7 +119,6 @@ for candidateNum in range(numCandidates):
         append_correctness_log(correctnessPath, name, correct, error)
         if not correct:
             print(error)
-  
 
 
     if not correct:
@@ -146,7 +145,7 @@ for candidateNum in range(numCandidates):
         filePath = responsesDir / f"{name}.py"
 
         correct, results, code = performanceImprovement(llmProviders, chosenProvider, name, filePath, correctnessPath, resFileName, resultsDir,
-                           algoName, code, results, instances, timePerItem, minCorrectnessTime, performanceRuns, timePerRun)
+                        algoName, code, results, instances, timePerItem, minCorrectnessTime, performanceRuns, timePerRun)
 
         if not correct:
             code = bestCurAlgo["code"]
@@ -165,7 +164,6 @@ for candidateNum in range(numCandidates):
         continue
 
 
-        
     planFileName = algoNameForFiles + "_" + str(candidateNum) + "_plan.txt"
     planPath = responsesDir / planFileName
     name =  algoNameForFiles + "_" + str(candidateNum) + "_post_plan"
@@ -177,9 +175,9 @@ for candidateNum in range(numCandidates):
     elif chosenProvider == llmProviders[1]: # anthropic
         performancePlan = providers.performancePlanAnthropicPrompt(algoName, code, results, performanceRuns * timePerRun)
         code = providers.applyPerformancePlanAnthropicPrompt(algoName, code, performancePlan)
-    elif chosenProvider == llmProviders[2]: # google
+    """elif chosenProvider == llmProviders[2]: # google
         performancePlan = providers.performancePlanGooglePrompt(algoName, code, results, performanceRuns * timePerRun)
-        code = providers.applyPerformancePlanGooglePrompt(algoName, code, performancePlan)
+        code = providers.applyPerformancePlanGooglePrompt(algoName, code, performancePlan)"""
     promptsUsed += 2
 
     with planPath.open("w", encoding="utf-8", newline="\n") as f:
@@ -207,7 +205,7 @@ for candidateNum in range(numCandidates):
         filePath = responsesDir / f"{name}.py"
 
         correct, results, code = performanceImprovement(llmProviders, chosenProvider, name, filePath, correctnessPath, resFileName, resultsDir,
-                           algoName, code, results, instances, timePerItem, minCorrectnessTime, performanceRuns, timePerRun)
+                        algoName, code, results, instances, timePerItem, minCorrectnessTime, performanceRuns, timePerRun)
 
         if not correct:
             print("Not correct")
@@ -227,3 +225,5 @@ for candidateNum in range(numCandidates):
 
 print(bestAlg["filename"])
 print(bestAlg["avg_ratio"])
+bestText = "best " + str(bestAlg["avg_ratio"])
+append_correctness_log(correctnessPath, bestAlg["filename"], False, bestText)
