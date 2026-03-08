@@ -7,6 +7,25 @@ import hashlib
 import random
 import time
 from bin_packing.algorithms import randomised_best_fit, simulated_annealing, grouping_genetic_algorithm, tabu_search, ant_colony_optimisation, GRASP, variable_neighbourhood_search, FDO
+from bin_packing.llm_algorithms import (
+    # Anthropic
+    anthropic_ant_colony_optimisation,
+    anthropic_fitness_dependent_optimiser,
+    anthropic_genetic_algorithm,
+    anthropic_GRASP,
+    anthropic_simulated_annealing,
+    anthropic_tabu_search,
+    anthropic_variable_neighbourhood_search,
+    
+    # OpenAI
+    openai_ant_colony_optimisation,
+    openai_fitness_dependent_optimiser,
+    openai_genetic_algorithm,
+    openai_GRASP,
+    openai_simulated_annealing,
+    openai_tabu_search,
+    openai_variable_neighbourhood_search
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RESULTS_DIR = PROJECT_ROOT / "results"
@@ -53,7 +72,10 @@ def build_parser():
    parser.add_argument(
       "--algo",
       # required=True,
-      choices=["rbf", "sa", "tabu", "gga", "aco", "grasp", "vns", "fdo"],
+      choices=["rbf", "sa", "tabu", "gga", "aco", "grasp", "vns", "fdo", 
+               "anthropic-aco", "anthropic-fdo", "anthropic-ga", "anthropic-grasp", "anthropic-sa", "anthropic-tabu", "anthropic-vns", 
+               "openai-aco", "openai-fdo", "openai-ga", "openai-grasp", "openai-sa", "openai-tabu", "openai-vns"
+               ],
       help="Which algorithm to run."
    )
 
@@ -84,21 +106,48 @@ def build_parser():
    help="Optional path to append one summary row (per dataset run) as CSV."
    )
 
+   parser.add_argument(
+      "--tpi",
+      type=float,
+      default=(1/600),
+      help="Time per item in seconds (time limit per instance = num_items * tpi). Default=1/600."
+   )
 
    return parser
 
 
 def select_algorithm(name: str):
     algorithm_map = {
-        "rbf": randomised_best_fit.randomisedBestFit,
-        "sa": simulated_annealing.simulatedAnnealingFFD,
-        "tabu": tabu_search.tabuSearchFFD,
-        "gga": grouping_genetic_algorithm.groupingGeneticAlgorithm,
-        "aco": ant_colony_optimisation.antColonyOptimisation,
-        "grasp": GRASP.reactiveGRASP,
-        "vns": variable_neighbourhood_search.variableNeighbourhoodSearchFFD,
-        "fdo": FDO.adaptiveFDO,
+         "rbf": randomised_best_fit.randomisedBestFit,
+         "sa": simulated_annealing.simulatedAnnealingFFD,
+         "tabu": tabu_search.tabuSearchFFD,
+         "gga": grouping_genetic_algorithm.groupingGeneticAlgorithm,
+         "aco": ant_colony_optimisation.antColonyOptimisation,
+         "grasp": GRASP.reactiveGRASP,
+         "vns": variable_neighbourhood_search.variableNeighbourhoodSearchFFD,
+         "fdo": FDO.adaptiveFDO,
+
+         # LLM Generated Algotihms
+         # Anthropic
+         "anthropic-aco": anthropic_ant_colony_optimisation.solve,
+         "anthropic-fdo": anthropic_fitness_dependent_optimiser.solve,
+         "anthropic-ga": anthropic_genetic_algorithm.solve,
+         "anthropic-grasp": anthropic_GRASP.solve,
+         "anthropic-sa": anthropic_simulated_annealing.solve,
+         "anthropic-tabu": anthropic_tabu_search.solve,
+         "anthropic-vns": anthropic_variable_neighbourhood_search.solve,
+               
+         # OpenAI
+         "openai-aco": openai_ant_colony_optimisation.solve,
+         "openai-fdo": openai_fitness_dependent_optimiser.solve,
+         "openai-ga": openai_genetic_algorithm.solve,
+         "openai-grasp": openai_GRASP.solve,
+         "openai-sa": openai_simulated_annealing.solve,
+         "openai-tabu": openai_tabu_search.solve,
+         "openai-vns": openai_variable_neighbourhood_search.solve,
+
     }
+    
     return algorithm_map[name]
 
 
@@ -125,7 +174,8 @@ def load_instances(args):
    
    raise ValueError(f"Unknown set: {set_name}")
 
-def applyAlgorithm(instances, chosenAlgorithm, runs, timePerItem=1000): # 1000 being effectively unlimited
+def applyAlgorithm(instances, chosenAlgorithm, runs, timePerItem=(1/600)):
+   print(timePerItem)
    ratioScore = 0
    totalBins = 0
    totalOpt = 0
@@ -189,7 +239,7 @@ def applyAlgorithm(instances, chosenAlgorithm, runs, timePerItem=1000): # 1000 b
       "num_instances": len(instances),
       "optimal_hits": optimalHits,
       "avg_ratio": avg_ratio,
-      "num_items": len(instance["weights"])
+      "time_per_item": timePerItem
    }
 
 
@@ -249,7 +299,7 @@ def main():
          if len(chosenInstances) == numInstances:
             break
 
-      summary = applyAlgorithm(chosenInstances, chosenAlgorithm, args.runs)
+      summary = applyAlgorithm(chosenInstances, chosenAlgorithm, args.runs, args.tpi)
 
       if args.csv:
          row = {"dataset": args.set, "algo": args.algo, "runs": args.runs, **summary}
@@ -257,7 +307,7 @@ def main():
       return
 
    # default
-   summary = applyAlgorithm(instances, chosenAlgorithm, args.runs)
+   summary = applyAlgorithm(instances, chosenAlgorithm, args.runs, args.tpi)
    if args.csv:
       row = {"dataset": args.set, "algo": args.algo, "runs": args.runs, **summary}
       append_summary_to_csv(args.csv, row)
