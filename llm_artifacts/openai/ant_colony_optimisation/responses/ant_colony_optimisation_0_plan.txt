@@ -1,0 +1,185 @@
+## 1) Change the constructive process to **bin-oriented ACS** (core improvement)
+Current method assigns items one-by-one to existing bins or a new bin. For bin packing, better ACO variants build **one bin at a time** by selecting a sequence/subset of items that fit, aiming to fill it tightly. This aligns decisions with the objective (min bins).
+
+### 1.1 Representation
+- Keep items sorted by decreasing weight as a base list.
+- Ant constructs solution as:
+  1) Start a new bin with a “start item” (usually one of the largest remaining).
+  2) Repeatedly add another remaining item that fits the residual capacity until no more fits.
+  3) Close the bin and repeat.
+
+### 1.2 Decision rule within a bin
+At each step in a partially filled bin with residual `r`, choose next item `j` among remaining items with `w[j] <= r` using ACS:
+- **Heuristic (η)** must emphasize tight packing:
+  - Primary: `η(j|r) = 1 / (1 + (r - w[j]))` (smaller leftover is better)
+  - Stronger: use a convex version: `η = 1 / (1 + (r - w[j]))^p` with `p ~ 2..4` (or equivalently increase beta).
+  - Add a *near-perfect bonus* if `r - w[j]` is 0,1,2 to strongly prefer exact/near-exact fills.
+- **Pheromone (τ)** tied to bin-building, not “item assigned to bin index”:
+  - Use **adjacency pheromone** τ[last_item][j] where `last_item` is the last inserted item in current bin. This is standard for sequence-based ACS and works well for “which items co-occur and in what order”.
+  - Also include a special START node per bin: τ[start][j] or a separate `tau_start[j]` to learn good bin starters.
+- **Score**: `score(j) = (τ[last][j]^alpha) * (η(j|r)^beta)`.
+- **Candidate list**: restrict choices to top-K items by heuristic closeness to fill (e.g., smallest `r-w[j]`) to reduce noise and runtime.
+
+### 1.3 Choosing the first item in a bin
+- Default is the largest remaining item (good for feasibility and speed).
+- But allow exploration among top L largest remaining using pheromone `tau_start` and heuristic `η_start = w[j]/bin_capacity` to learn better starters.
+
+### 1.4 When no item fits
+- Close bin.
+- This is the natural “bin count” decision point; we will reinforce decisions that reduce number of bins.
+
+
+## 2) Replace pheromone model and updates with **ACS-style local + global update**
+The current reinforcement adds pheromone to *all pairs* in a bin, which is expensive and noisy.
+
+### 2.1 Pheromone structures
+- Use dense for n<=1200 as now; sparse beyond.
+- Store:
+  - `tau_adj[i][j]`: adjacency pheromone for transitions inside a bin.
+  - `tau_start[j]`: pheromone for choosing j as first in a bin.
+- Do **not** use average over bin items; use only the actual transitions used by the ant.
+
+### 2.2 Initialization
+- Set `tau0` based on baseline solution quality:
+  - Let `m0 = bins(FFD/BFD baseline)`.
+  - Standard ACS init: `tau0 = 1 / (n * m0)` (scaled to your min/max). Practically: choose tau0 so that τ-values are small but non-zero; keep clamp.
+
+### 2.3 Local update (standard ACS)
+After an ant chooses an item transition (including start->first), apply:
+- `τ = (1-phi)*τ + phi*tau0` with small `phi ~ 0.05..0.2`.
+This encourages exploration and prevents early stagnation.
+
+### 2.4 Global update (iteration-best and/or global-best)
+After all ants in an iteration:
+- Evaporate globally: `τ *= (1-rho)` with `rho ~ 0.05..0.2`.
+- Reinforce only edges in the best solution (iteration-best primarily; occasionally global-best as daemon action):
+  - `Δτ = Q / m_best` (or `Q / (m_best - LB + 1)` if you want LB-sensitive strength), deposited on:
+    - start edges used in each bin
+    - adjacency edges between consecutive items within each bin (in the order constructed)
+- This is dramatically less work than all-pairs and much more informative.
+
+### 2.5 Stagnation control
+- Track “no improvement” iterations.
+- If stagnating, temporarily:
+  - increase exploration (lower q0, higher phi)
+  - or partially reset pheromones towards tau0 (e.g., blend 30% tau0).
+This is standard in ACO to maintain progress.
+
+
+## 3) Strengthen heuristic information with **bin packing specific signals**
+Heuristic quality is crucial.
+
+### 3.1 Use complement-aware heuristic
+For a residual `r`, items near `r` are best. But also, some items have good “partner” frequencies.
+- Precompute a lightweight frequency table of weights (since 1D integer weights): `count_by_weight[w]`.
+- For each residual r, a perfect complement is weight r.
+- Add heuristic bonus if `count_by_weight[r] > 0` among remaining.
+This helps the ant anticipate completing a bin.
+
+### 3.2 Candidate list based on residual
+Maintain remaining items in buckets by weight for O(1)/O(C) access to best fits:
+- Since weights are integers, build `bucket[weight] -> list of item indices`.
+- For residual r, candidate weights are r, r-1, r-2, … down to max(1, r-WINDOW).
+- WINDOW like 30–80 depending on capacity scale. If capacity can be huge, fall back to scanning a limited number of items from the sorted list.
+This reduces per-step scanning of all bins/items and lets you spend the time budget on more ants.
+
+
+## 4) Improve baseline and daemon actions (still within ACO practice)
+ACO for BPP commonly includes a good initial heuristic and occasional daemon improvements.
+
+### 4.1 Better starting solution
+Compute multiple fast baselines and keep best:
+- FFD (already)
+- BFD (Best Fit Decreasing)
+- Randomized FFD variants: shuffle among equal weights, run e.g. 10–30 times quickly at start.
+Use best as initial global-best and to set tau0.
+
+### 4.2 Iteration-best reinforcement and elite strategy
+- Each iteration reinforce only iteration-best.
+- Every k iterations (e.g., 5–10) also reinforce global-best (elite) with smaller factor.
+This focuses search without overpowering exploration.
+
+
+## 5) Make construction faster so you can do **more ants/iterations within time**
+Right now much time is spent computing feasible-bin scores and iterating bins.
+With bin-oriented build + candidate buckets, complexity drops.
+
+Concrete steps:
+- Use integer arrays/lists for remaining flags.
+- Use weight buckets to find feasible candidates quickly.
+- Cache `eta` for given (residual, weight) if capacity moderate; otherwise compute inline.
+- For dense τ: store rows as Python lists; for sparse: dict-of-dict as now but only for visited edges.
+
+Then increase search effort:
+- Raise ants count adaptively with n (but bounded by time): e.g., start 24–40 ants for n<=500, 16–24 for n<=2000.
+- Increase max_iters (fixed) to something like 2000–5000, but rely on time checks to stop.
+This uses up to the allowed 100s when available.
+
+
+## 6) Use a stronger objective tie-break during selection and reinforcement
+Current cost uses (m, waste, maxwaste). Keep bin count primary.
+But for guiding pheromone updates, use fill-quality:
+- Define solution quality for pheromone as:
+  - primary: fewer bins
+  - secondary: higher average utilization (lower total waste)
+  - tertiary: number of “almost full bins” (waste<=k)
+
+For Δτ:
+- `Δτ = Q / (m + λ*waste/bin_capacity)` where λ small (0.1–0.5).
+This nudges ants to create tighter bins, which tends to reduce bins later.
+
+
+## 7) Determinism at timeout and validity repair
+Keep the current “complete deterministically if time is up” idea, but adapt it to bin-oriented build:
+- If time exceeded mid-bin: greedily complete current bin using best-fit from buckets, then finish remaining with BFD.
+- Maintain the end-of-solve repair pass (missing items) as safety.
+
+
+## 8) Parameter schedule (implementation-ready defaults)
+Start with robust ACS defaults and tune lightly:
+- `alpha = 1.0`
+- `beta = 6.0` (strong heuristic for tight fill)
+- `q0 = 0.8` early, reduce to 0.6 if stagnation (or schedule)
+- `rho = 0.1` global evaporation
+- `phi = 0.1` local update
+- Candidate list size K: 20–60 (depend on n); or residual-window weights.
+- Pheromone bounds: keep min/max clamping, but widen: e.g. `tau_min=0.01`, `tau_max=10` (scale with tau0).
+
+
+## 9) Iteration structure and time checks (hard requirement compliant)
+- Choose a fixed `max_iters` (e.g., 5000). Always loop for that many unless time exceeded.
+- Time check every:
+  - iteration
+  - and inside ant construction every X selections (bitmask as you do)
+- Return best found so far.
+
+
+## 10) Evaluation/diagnostics hooks (no extra outputs)
+Internally track:
+- best bins over time
+- stagnation counter
+- average bins per iteration
+Use to drive adaptive q0/partial reset.
+(No logging/output; just internal variables.)
+
+
+## 11) Expected impact on the reported metrics
+- The bin-oriented ACS directly optimizes “make bins full”, typically reducing bin count vs item-to-bin assignment ACO.
+- Adjacency-based pheromone + local update improves learning signal and exploration.
+- Faster construction enables more ants/iterations within 40–100s, which is critical given your current solution already uses full 40s.
+- Stronger baselines and elite reinforcement reduce the tail where you end up +1–3 bins above LB.
+
+
+## 12) Implementation checklist (to hand to the coder)
+1) Add baseline heuristics: BFD + randomized FFD; set initial best.
+2) Build buckets by weight and remaining counts.
+3) Implement bin-oriented construct:
+   - choose starter
+   - while fits exist: select next by ACS rule using candidate weights/items
+   - apply local pheromone update on used edges
+4) Implement τ structures: dense/sparse adjacency and `tau_start`.
+5) Implement global evaporation + reinforcement on iteration-best, occasional global-best.
+6) Add stagnation handling (parameter tweak or partial pheromone reset).
+7) Keep timeout completion and final repair.
+
+This plan keeps ACO/ACS as the primary search method, but upgrades it to a bin-packing-appropriate ACO variant and reallocates runtime from low-signal computations to higher-yield search, targeting a lower average bin/LB ratio.

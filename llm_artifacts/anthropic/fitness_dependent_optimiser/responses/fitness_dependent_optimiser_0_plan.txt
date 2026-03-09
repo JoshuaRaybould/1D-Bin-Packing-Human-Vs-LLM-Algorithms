@@ -1,0 +1,126 @@
+## Detailed Implementation Plan
+
+### 1. Continuous Fitness Function (Critical)
+
+Replace the discrete `evaluate` function with a continuous Falkenauer-style fitness:
+
+```
+fitness = num_bins - sum((bin_weight_i / C)^2) / num_bins
+```
+
+- Lower is better (minimizing bins while maximizing utilization)
+- This provides gradients between solutions with the same bin count, enabling the FDO weight `w_i` to differentiate meaningfully between solutions
+- The term `sum((fill_ratio)^2)/num_bins` ranges from 0 to 1, rewarding tighter packing
+- This is essential because with discrete bin count, most solutions in the population have identical fitness, making w_i = 0 for all and collapsing FDO into pure exploitation
+
+### 2. Faster Decode Functions
+
+**Best Fit Decode optimization:**
+- Pre-extract weights into a local variable at the start of solve
+- Use local variable binding for `bin_capacity` inside the decode function
+- Avoid method lookups by binding `append` methods
+- Consider maintaining a sorted list of bin remaining capacities using `bisect` module for O(log b) best-fit lookup instead of O(b) linear scan
+- For the bisect approach: maintain a sorted list of (remaining, bin_index) and use bisect_left to find the tightest fitting bin
+
+**Dual decode for final output:**
+- When producing the final result, try the best permutation with both FF and BF decoders, return whichever uses fewer bins
+
+### 3. Faithful FDO Algorithm Structure
+
+Restructure the main loop to follow the standard FDO algorithm:
+
+**Step 1: Calculate fitness weight for each individual:**
+```
+w_i = (f_i - f_best) / (f_worst - f_best)
+```
+Using the continuous fitness, this gives meaningful values in [0, 1].
+
+**Step 2: Categorize individuals into three groups (per original FDO paper):**
+- **w_i < 0.3 (good fitness):** Exploitation - small perturbation near current position
+  - Perform 1-3 adjacent swaps or single insert moves
+  - These solutions are already good, fine-tune them
+  
+- **0.3 ≤ w_i < 0.7 (medium fitness):** Balanced - partial movement toward guide
+  - Order crossover (OX) with the guide bee
+  - Segment length from guide: `int((1 - w_i) * n * 0.6)` positions copied from guide
+  - Remaining positions filled from current individual's order
+  
+- **w_i ≥ 0.7 (poor fitness):** Exploration - large movement
+  - With 50% probability: generate a new weight-biased random permutation (sort by weight with random jitter)
+  - With 50% probability: large-segment OX from guide (copy 70-90% from guide, rest random)
+
+**Step 3: Greedy selection:**
+- Accept new solution if fitness ≤ current fitness (using continuous measure)
+- Update global best based on primary objective (bin count), with continuous fitness as tiebreaker
+
+### 4. Improved Population Initialization
+
+**Population size:** `min(80, max(20, n))` - larger populations for better coverage
+
+**Seeding strategy:**
+- 1 pure FFD (weight-decreasing sorted) permutation
+- 5-10 near-FFD permutations: sort by weight descending, then swap pairs of items with weight difference < 5% of capacity
+- 5 reverse-grouped permutations: group items by weight class, shuffle within groups
+- Remaining: random permutations with heavy-item-first bias (weighted random sampling without replacement, probability proportional to weight)
+
+### 5. Better Permutation Operators
+
+**Order Crossover (OX) - keep current but fix:**
+- Ensure segment selection wraps around (circular crossover possible)
+- Select segment start uniformly, length based on w_i
+
+**Insert Move operator (for exploitation):**
+- Remove an item from one position and insert at another
+- Better than swap for permutation-based bin packing because it preserves more relative ordering
+- For exploitation: pick a random item, try inserting it 1-3 positions earlier (toward front = processed earlier = packed when more bins have space)
+
+**Scramble Sub-sequence (for exploration):**
+- Select a random subsequence of length proportional to w_i
+- Randomly shuffle that subsequence
+- Preserves structure outside the scrambled region
+
+### 6. Adaptive Stagnation Response
+
+- Track `generations_without_improvement` counter
+- If no improvement for 100 generations: temporarily increase all w_i by 0.2 (capped at 1.0) to boost exploration
+- If no improvement for 300 generations: replace bottom 30% of population with weight-biased random permutations (not pure random - use jittered weight sort)
+- Reset counter after any improvement
+
+### 7. Elitism
+
+- Always preserve the top 2 solutions in the population
+- After generating new population, if the best-ever solution is not present, replace the worst individual with it
+
+### 8. Time Management
+
+- Use `time_limit * 0.92` as the main loop cutoff
+- Check time once per generation (not per individual) to reduce overhead
+- In the final 8% of time: take the best permutation found and try small perturbations (single swaps, single inserts) evaluated with both FF and BF decoders to squeeze out final improvements - this is still within FDO framework as it's just evaluating the final elite solution more carefully
+
+### 9. Implementation Optimizations
+
+- Pre-compute `weights` as a tuple for faster indexing
+- Use `random.randint`, `random.random`, `random.shuffle` as local variables to avoid repeated global lookups
+- In the decode function, use `enumerate` and avoid `range(len(...))` patterns
+- For the best-fit decode with bisect: maintain `sorted_remaining` list, use `bisect.bisect_left` to find insertion point, then scan left for the tightest fit ≥ weight. This reduces decode from O(n*b) to O(n*log(b))
+- Pre-allocate lists where possible
+
+### 10. Output Construction
+
+- When building final output, decode the best permutation with both FF and BF
+- Select whichever produces fewer bins
+- If tied, select the one with better Falkenauer fitness (tighter packing)
+- Compute `bin_weights` directly during decode (add weight tracking to decode functions) to avoid a second pass
+
+### Summary of Expected Impact
+
+| Improvement | Expected Ratio Reduction |
+|---|---|
+| Continuous fitness function | Major - enables FDO to differentiate solutions |
+| Faster decode (bisect-based BF) | Enables 3-5x more iterations |
+| Better FDO operators (insert, scramble) | Moderate - better search moves |
+| Weight-biased initialization | Moderate - better starting population |
+| Adaptive stagnation | Minor - prevents premature convergence |
+| Dual decode for output | Minor - catches cases where FF beats BF |
+
+Target: reduce average ratio from 1.027 to below 1.015.

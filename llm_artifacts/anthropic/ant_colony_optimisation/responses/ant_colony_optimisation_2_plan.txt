@@ -1,0 +1,105 @@
+## Improvement Plan for ACO Bin Packing
+
+### Phase 1: Better Initial Solution & Preprocessing
+
+1. **Implement both FFD and BFD**: Run both First Fit Decreasing and Best Fit Decreasing. Keep the one with fewer bins as the starting best solution.
+
+2. **Preprocessing**:
+   - Separate zero-weight items and items exceeding capacity; handle them outside the main loop.
+   - Pre-sort remaining items by weight descending; store as a list of (original_index, weight) tuples.
+   - Precompute `total_weight` and `L2 lower bound` = ceil(sum(weights) / bin_capacity) to help guide the search.
+
+### Phase 2: Switch to Bin-Oriented ACO Construction
+
+3. **Replace item-oriented construction with bin-oriented construction**:
+   - Maintain a set/list of unassigned items (indices into the sorted array).
+   - Build one bin at a time:
+     a. **Seed selection**: Always pick the heaviest unassigned item as the seed for a new bin (deterministic, mirrors FFD logic).
+     b. **Item selection loop**: While there exist unassigned items that fit in the current bin's remaining capacity:
+        - Compute a score for each feasible item: `score = τ_component^α × η_component^β`
+        - `τ_component`: average pheromone between the candidate item and all items already in the current bin (cap at 10-15 items sampled for efficiency)
+        - `η_component`: `(candidate_weight / remaining_capacity)` — rewards tight fits heavily when β > 1
+        - Use **pseudo-random proportional rule**: with probability `q0`, pick the item with the highest score (exploitation); otherwise, roulette-wheel selection (exploration)
+     c. Close the bin when no more items fit; open a new bin.
+   - This naturally produces tighter-packed bins.
+
+4. **Efficient feasibility filtering**:
+   - Maintain unassigned items in a list sorted by weight descending.
+   - Use binary search (`bisect`) to quickly find all items with weight ≤ remaining capacity.
+   - This avoids scanning all unassigned items.
+
+### Phase 3: MMAS Pheromone Model
+
+5. **Pheromone representation**:
+   - For n ≤ 400: use a flat list of size n×n, accessed as `tau[i*n + j]`. Symmetric, so always use min(i,j), max(i,j) mapping.
+   - For n > 400: use a Python dict with (min_i, max_j) keys and a default value of τ_init.
+
+6. **MMAS bounds**:
+   - `τ_max = 1.0 / (rho × best_num_bins)`
+   - `τ_min = τ_max / (2 × n)`
+   - Recompute whenever best_num_bins changes.
+   - Clamp all pheromone values to [τ_min, τ_max] during evaporation.
+
+7. **Evaporation**: `τ(i,j) = (1 - ρ) × τ(i,j)` for all pairs, then clamp to τ_min. For sparse representation, delete entries that fall to τ_min.
+
+8. **Deposit strategy**:
+   - Each iteration: deposit on the **iteration-best** solution with amount `1.0 / iteration_best_bins`.
+   - Every 5th iteration: deposit on **global-best** instead (elitist reinforcement).
+   - Deposit means: for each bin in the solution, for all pairs (i,j) in that bin, add the deposit amount to τ(i,j). Cap pair enumeration at ~200 pairs per bin (random sampling for large bins).
+
+9. **Stagnation detection and pheromone reset**:
+   - Track consecutive iterations without improvement.
+   - After 40 iterations without improvement: reset all pheromones to τ_init, deposit from global best, and temporarily increase exploration (lower q0 to 0.5 for 10 iterations).
+
+### Phase 4: ACO Parameters
+
+10. **Parameter settings**:
+    - `α = 1.0` (pheromone importance)
+    - `β = 3.0` (heuristic importance — increased from 2.5 to more strongly prefer tight fits)
+    - `ρ = 0.08` (evaporation rate — slightly lower for more persistence)
+    - `q0 = 0.85` (exploitation probability — high to leverage pheromone info)
+    - `τ_init = 1.0`
+
+11. **Number of ants per iteration**:
+    - n ≤ 50: 20 ants
+    - n ≤ 150: 15 ants
+    - n ≤ 400: 10 ants
+    - n > 400: 5 ants
+    - Dynamically reduce if iterations are too slow (measure time per iteration)
+
+### Phase 5: Efficiency Optimizations
+
+12. **Avoid redundant computation**:
+    - In the bin-oriented construction, when computing pheromone for a candidate item against bin contents, limit to the min(len(bin_items), 8) most recently added or heaviest items in the bin.
+    - Cache frequently accessed weights in a local array.
+
+13. **Use `bisect` module** for maintaining sorted unassigned items and quickly finding feasible items.
+
+14. **Time management**:
+    - Check time at the start of each ant construction (not inside the inner loop).
+    - Use `time_limit * 0.95` as the cutoff to leave margin.
+    - If time remains after main ACO loop, continue with additional iterations.
+
+15. **Adaptive iteration control**:
+    - After the first few iterations, measure time per iteration.
+    - Estimate how many iterations fit in the remaining time budget.
+    - Adjust num_ants if needed to maximize iterations.
+
+### Phase 6: Solution Finalization
+
+16. **Post-processing (within ACO framework)**:
+    - After ACO finishes, do one final deterministic construction using the converged pheromone matrix (q0 = 1.0, fully greedy) to extract the best deterministic solution implied by the pheromones.
+
+17. **Output formatting**:
+    - Re-insert zero-weight items into the first bin.
+    - Compute bin_weights from the final packing.
+    - Return the solution with fewer bins between the ACO result and the initial BFD/FFD.
+
+### Expected Impact
+
+- **Bin-oriented construction** should produce tighter-packed bins (fewer nearly-empty bins), directly reducing bin count.
+- **Pseudo-random proportional rule** balances exploitation/exploration better than pure roulette wheel.
+- **Higher β (3.0)** more strongly rewards exact or near-exact fits, reducing wasted space.
+- **MMAS bounds** prevent premature convergence while maintaining learned information.
+- **Efficiency gains** from bisect-based feasibility and limited pheromone sampling allow more iterations in the time budget.
+- Target improvement: reduce ratio from ~1.028 to ~1.01 or lower.

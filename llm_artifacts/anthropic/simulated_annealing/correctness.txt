@@ -1,0 +1,23 @@
+simulated_annealing_0_initial : RUNTIME_ERROR: AttributeError: 'dict' object has no attribute '__dict__'
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/joshua/Documents/fyp/jxr133/llm_artifacts/anthropic/simulated_annealing/responses/simulated_annealing_0_initial.py", line 112, in solve
+    exp = __builtins__.__dict__.get('__import__', __import__)('math').exp
+          ^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'dict' object has no attribute '__dict__'
+simulated_annealing_0_correctness_1 : CORRECT
+simulated_annealing_0_post_plan : CORRECT
+simulated_annealing_0_performance_4 : CORRECT
+simulated_annealing_1_initial : RUNTIME_ERROR: IndexError: list index out of range
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/joshua/Documents/fyp/jxr133/llm_artifacts/anthropic/simulated_annealing/responses/simulated_annealing_1_initial.py", line 105, in solve
+    if bin_wts[tgt] + w > bin_capacity:
+       ~~~~~~~^^^^^
+IndexError: list index out of range
+simulated_annealing_1_correctness_1 : CORRECT
+simulated_annealing_1_post_plan : CORRECT
+simulated_annealing_1_performance_4 : CORRECT
+simulated_annealing_2_initial : CORRECT
+simulated_annealing_2_post_plan : CORRECT
+simulated_annealing_2_performance_3 : CORRECT
+simulated_annealing_2_performance_4 : CORRECT
+simulated_annealing_2_initial : best 1.0129858711425064

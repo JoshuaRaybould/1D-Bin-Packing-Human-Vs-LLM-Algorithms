@@ -1,0 +1,33 @@
+tabu_search_0_initial : CORRECT
+tabu_search_0_post_plan : Time limit given to the algorithm was not respected.
+tabu_search_0_performance_3 : IMPORT_ERROR: SyntaxError: name 'total_slack2' is used prior to nonlocal declaration (tabu_search_0_performance_3.py, line 706)
+  File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
+  File "/home/joshua/Documents/fyp/jxr133/llm_artifacts/openai/tabu_search/responses/tabu_search_0_performance_3.py", line 706
+    nonlocal total_slack2, violation
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+SyntaxError: name 'total_slack2' is used prior to nonlocal declaration
+tabu_search_0_performance_4 : CORRECT
+tabu_search_1_initial : CORRECT
+tabu_search_1_post_plan : CORRECT
+tabu_search_1_performance_3 : RUNTIME_ERROR: IndexError: list assignment index out of range
+    apply_swap(i_item, j_item, bi, bj, bins, loads, assign, pos)
+  File "/home/joshua/Documents/fyp/jxr133/llm_artifacts/openai/tabu_search/responses/tabu_search_1_performance_3.py", line 100, in apply_swap
+    bins[bj][pj] = i
+    ~~~~~~~~^^^^
+IndexError: list assignment index out of range
+tabu_search_1_performance_4 : CORRECT
+tabu_search_2_initial : Time limit given to the algorithm was not respected.
+tabu_search_2_correctness_1 : CORRECT
+tabu_search_2_post_plan : IMPORT_ERROR: SyntaxError: name 'cur_assign' is used prior to nonlocal declaration (tabu_search_2_post_plan.py, line 951)
+  File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
+  File "/home/joshua/Documents/fyp/jxr133/llm_artifacts/openai/tabu_search/responses/tabu_search_2_post_plan.py", line 951
+    nonlocal cur_assign, cur_loads, bin_items, bin_pos
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+SyntaxError: name 'cur_assign' is used prior to nonlocal declaration
+tabu_search_2_performance_4 : IMPORT_ERROR: SyntaxError: no binding for nonlocal 'cur_slack' found (tabu_search_2_performance_4.py, line 743)
+  File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
+  File "/home/joshua/Documents/fyp/jxr133/llm_artifacts/openai/tabu_search/responses/tabu_search_2_performance_4.py", line 743
+    nonlocal cur_slack, cur_bof, cur_buckets, cur_top, cur_top_dirty
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+SyntaxError: no binding for nonlocal 'cur_slack' found
+tabu_search_0_initial : best 1.0285842322291336

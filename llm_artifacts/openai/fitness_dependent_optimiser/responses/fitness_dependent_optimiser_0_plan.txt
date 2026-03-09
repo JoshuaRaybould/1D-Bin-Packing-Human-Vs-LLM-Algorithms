@@ -1,0 +1,178 @@
+## 0) Keep constraints / overall shape
+- Keep `solve(bin_capacity, weights, time_limit)` and return the same dict structure.
+- Keep the algorithm as **Fitness Dependent Optimizer (FDO)** with a **population of scouts** that move in a fitness-dependent way toward the best.
+- Maintain: fixed iteration budget + periodic time checks. Use more of the available time (up to 100s hard stop).
+
+## 1) Instrumentation & targets (internal only)
+Add lightweight internal tracking (no printing):
+- Track `LB = ceil(sum(weights)/C)` and optionally `max_weight` sanity.
+- Track best bins count `best_bins` and `gap = best_bins - LB`.
+- Track iteration-level counters: decodes performed, accepted moves, last_improvement_time.
+Purpose: drive adaptive parameters (pace, diversification) based on *gap-to-LB*.
+
+## 2) Upgrade the decoder (biggest quality gain while staying permutation-based)
+Current decoder = plain Best-Fit (BF). Replace with a stronger **hybrid “Best-Fit with lookahead tie-breaks”** that is still order-based and deterministic given an order.
+
+### 2.1 Data structures
+Maintain for open bins:
+- `bw[b]` current weight
+- `rem = C - bw[b]`
+- Additionally maintain bins grouped by remaining capacity using a simple bucket array size `C+1` (since integer weights). This makes “best fit” near O(1) average:
+  - `buckets[rem]` = list of bin indices having that remaining space.
+  - When a bin’s remaining changes, move its index between buckets.
+If `C` can be large, use `dict[int, list[int]]` + track min feasible rem by scanning upward from `w` (still faster than scanning all bins).
+
+### 2.2 Tie-break rules (quality)
+When multiple bins can fit an item with the same best remainder, choose using:
+1) Prefer bins that become *tight* (rem2 small).
+2) If tie: prefer bin where the item creates a remainder that is “hard to fill” given remaining items.
+   - Precompute a frequency table `freq[weight]` of remaining items during decode (update as you place).
+   - Score remainder `r` by whether there exists an item weight exactly `r` or close complements.
+   - Cheap proxy: `hardness(r) = 1/(1+freq[r]) + 1/(1+freq[r-1]) + 1/(1+freq[r+1])` within bounds.
+3) If still tie: prefer older bin (lower index) to stabilize.
+
+This remains a decoder on an order, but reduces pathological early placements that block later perfect complements.
+
+### 2.3 Optional “1-step lookahead” for large items only
+For the first `K` items in the order (e.g., K=30–80 depending on n/time), apply a limited lookahead:
+- If item weight `w` is large (e.g., `w >= 0.6C`), test top 2 candidate bins (best fit and second-best) and choose the one that yields lower expected waste after considering availability of complement weights.
+This costs little (only for a few items) but can materially reduce bin count.
+
+### 2.4 Keep output format
+Decoder returns `(packing, bin_weights)` using item indices.
+
+## 3) Improve fitness: prioritize bin reduction more aggressively near LB
+Keep lexicographic `(bins, waste)` comparison, but strengthen the scalar guidance used for pace.
+
+### 3.1 Add “gap-to-LB” into pace
+Compute `gap = f_bins - LB` and `best_gap`.
+- If `gap > best_gap`: pace should be high (strong pull to best).
+- If `gap == best_gap`: pace depends more on waste.
+- If `best_gap == 0` (already at LB): shift objective to minimize waste only (stabilize), but also diversify to prove optimality is hard; still keep best.
+
+### 3.2 Waste normalization
+Use `waste_per_bin = waste / f_bins` or `waste / C` scaled, so comparisons across different bin counts behave smoother.
+(Still keep lexicographic for acceptance; use normalized values only to compute pace/probabilities.)
+
+## 4) Add structure-derived FDO movement operators (still permutation moves)
+The current guided insertion uses best’s positions only. Add operators that use **bin structure from decoding** but apply changes as permutation edits (compatible with the “permutation + decoder” paradigm).
+
+### 4.1 Cache decoded structure per scout
+For each scout store:
+- `order`
+- `fitness`
+- `bins` (list of lists of item indices) and `bw`
+Update only when the scout is accepted (or when it becomes best). This avoids re-decoding just to know bin structure for movement.
+
+### 4.2 New move: “bin-emptying guided relocation” (permutation-level)
+Goal: reduce bin count by emptying one light/awkward bin.
+Procedure (on a scout’s current decoded bins):
+1) Pick a candidate bin to eliminate: prefer smallest `bw` or highest waste bin.
+2) For each item in that bin, find target bins with enough remaining space (using current decoded state) with best-fit tie-break.
+3) Convert that planned reassignment into an **order modification**:
+   - Move each item to appear immediately after a representative item of the target bin in the permutation (so decoder tends to place it there).
+   - For stability, move heavier items first.
+4) Apply limited random noise depending on pace.
+This is still an order edit (insertions), but uses packing insight.
+
+### 4.3 New move: “complement pairing injection”
+Identify in `best` packing pairs (or triples) that tightly fill bins (e.g., sum close to C). Enforce them in a scout order:
+- Choose 1–3 such groups from best.
+- In the scout permutation, relocate items of each group to be consecutive, ordered by descending weight.
+This increases likelihood the decoder reproduces good tight bins.
+
+### 4.4 New move: “heavy-prefix preservation crossover-like alignment” (FDO-consistent)
+Instead of full crossover (different algorithm family), do FDO movement that copies a prefix structure:
+- Take top `p` items by weight (global ranking) and reorder them in the scout to match the best’s relative order exactly.
+- Leave tail mostly unchanged with mild mutation.
+This is a stronger exploitation step than random guided insertion.
+
+### 4.5 Operator schedule driven by pace/gap
+- High pace (worse scouts): use strong alignment/prefix preservation.
+- Medium pace: use bin-emptying attempt 30–50% of the time.
+- Low pace (near best): use complement pairing + very small mutations.
+
+## 5) Acceptance / replacement strategy (improve exploration without losing best)
+Current acceptance is almost purely greedy. Improve in an FDO-typical way by allowing controlled acceptance of equal-bin worse-waste solutions early, then tighten.
+
+### 5.1 Annealed acceptance on secondary objective
+Let `progress = elapsed / time_limit` (clipped to 1). For moves with same bin count:
+- Accept if waste improves.
+- Else accept with probability `p = p0 * (1-progress)^2` where `p0` ~ 0.15, and only if waste regression is within a threshold (e.g., <= 2–5% of C per bin).
+This maintains diversity of packings when bins are equal.
+
+### 5.2 Population diversity management by signatures
+Maintain a small hash/signature per scout based on its decoded packing (not order):
+- Example signature: sorted multiset of bin weights (tuple(sorted(bw))) plus maybe top-5 bin weights.
+If too many scouts share the same signature, reinitialize some using diversified construction (Section 6).
+
+## 6) Better initialization and periodic reconstruction (diversification)
+The current init is half random, half perturbed sorted. Add standard strong constructive seeds (still order-based):
+
+### 6.1 Multiple deterministic seed orders
+Create 4–8 seed permutations:
+- Decreasing weights (current)
+- Increasing weights (sometimes helps complementing)
+- Decreasing by `w mod k` groups (k=3..5) to vary complement structure
+- “Pairing-biased” order: sort by closeness to C/2 descending (prioritize medium items)
+- Random but with heavy items fixed in front
+Decode each; include best few as initial population.
+
+### 6.2 Adaptive restarts
+Instead of restarting “worst by fitness” only every 40 iters, trigger when:
+- No improvement in `best_bins` for `T` seconds (e.g., 0.15–0.30 of time_limit).
+Restart a fraction (20–35%) of population using:
+- 50%: bin-emptying move applied to best order (large perturbation)
+- 50%: new randomized constructive order (from 6.1 with shuffled tie-breaks)
+
+## 7) Reduce evaluation cost to search more within time
+Decoding dominates runtime. Increase candidate throughput.
+
+### 7.1 Two-stage evaluation (screening)
+For most generated `new_order`, do a fast approximate evaluation first:
+- Decode only first `M` items (e.g., M=min(n, 120)) to estimate bin pressure, plus maintain partial bins.
+- Or compute a cheap proxy: number of bins opened after placing top-K heaviest.
+If proxy is clearly worse than current scout (e.g., already uses > cur_bins on partial), skip full decode and reject.
+Only fully decode if it passes the screen.
+
+This preserves time for promising candidates while staying within the same search family.
+
+### 7.2 Reuse `pos_in_best`
+Currently rebuilt inside guided insertion each call. Precompute once per update of `best_order`:
+- `best_pos[item]` array length n.
+Update only when best changes.
+
+## 8) Iteration/time budgeting: actually use up to 100 seconds
+You currently stop at `time_limit` (40s feedback) but environment allows up to 100s. Use:
+- Internally set `effective_limit = min(100.0, max(time_limit, 0.0))` but do **not** exceed the passed-in if the caller expects it; however the prompt says execution stops at 100s and no penalty for longer. So: respect `time_limit` if it is provided as the true cap. If benchmarks always pass 40 but allow 100, you may extend by using `effective_limit = min(100.0, time_limit * 2.5)` *only if allowed by evaluation harness*. If uncertain, keep respecting `time_limit` strictly.
+
+Regardless, within the given limit:
+- Increase iteration budget significantly and rely primarily on time checks (iterations become a soft cap).
+- Example: `iter_budget = very_large (e.g., 10**9)` but with frequent time checks; or keep `iter_budget` high (e.g., 20000–100000) with `check_every` tuned.
+
+## 9) Parameter retuning (starting values)
+- `pop_size`: scale a bit higher since screening + faster decode will help. Target 30–80 depending on n.
+- `check_every`: 20–50 to reduce overhead, but also check inside the inner scout loop every few scouts.
+- Operator probabilities (rough):
+  - If scout worse in bins than best: 60% prefix preservation, 30% guided insertion, 10% random mutation
+  - If equal bins: 40% bin-emptying attempt (to break through), 40% complement pairing, 20% small mutate
+  - If scout is best: 70% micro-mutate, 30% bin-emptying on best (careful) to try reduce bins.
+
+## 10) Implementation order (concrete steps)
+1) Add LB computation and best-gap tracking.
+2) Replace decoder with bucketed best-fit + tie-breaks; verify packing validity.
+3) Modify data structures: store per-scout decoded bins/bw when accepted.
+4) Add new movement operators (4.2–4.4) that only edit permutations.
+5) Update pace function to include gap-to-LB.
+6) Add two-stage screening to reduce full decodes.
+7) Replace restart logic with adaptive restarts + diverse constructors.
+8) Retune iteration budget to be time-driven rather than fixed small cap.
+9) Verify hard requirements: only `random` module, no seeding, periodic time checks, fixed iteration loop present.
+
+## 11) Expected effect on the reported metrics
+- Decoder tie-break + lookahead should reduce “avoidable” extra bins on borderline instances.
+- Bin-emptying operator specifically targets decreasing bin count (the main source of ratio > 1), which pure position alignment often fails to do.
+- Screening + faster bin selection increases candidate evaluations per second, improving solution quality under the same time.
+- Diversity by packing signatures reduces premature convergence where many permutations decode to the same packing.
+
+Net: lower average ratio (target improvement from ~1.027 toward ~1.015–1.020 depending on instance set) and fewer extra bins over LB, while still being an FDO-based permutation search.

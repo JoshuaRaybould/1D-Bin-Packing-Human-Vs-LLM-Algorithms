@@ -1,0 +1,134 @@
+## Detailed Implementation Plan
+
+### 1. Compute Lower Bound (L2 Martello-Toth)
+
+At the start of `solve`, compute a lower bound so we can detect optimal solutions and stop early:
+- Compute L1 = ceil(sum(weights) / bin_capacity)
+- Compute L2 using the Martello-Toth bound: For threshold values from 1 to C/2, count items > C/2 (they each need a bin), then count how much residual capacity from those bins can absorb items in range [C-threshold, C/2], and remaining items in (0, threshold] fill the rest. Take max over all thresholds.
+- If current best equals lower bound, stop searching.
+
+### 2. Efficient Construction Phase
+
+Rewrite `construct_solution` for speed:
+- Maintain `bin_remaining` as a simple list of remaining capacities.
+- For the greedy evaluation, use a **best-fit** criterion: find bins where the item fits with minimum remaining capacity after placement.
+- To build the RCL efficiently:
+  - Compute min_residual and max_residual among feasible bins.
+  - threshold = min_residual + alpha * (max_residual - min_residual)
+  - RCL = bins with residual_after_placement <= threshold
+  - Randomly choose from RCL.
+- **Optimization**: Instead of iterating all bins every time, use `bisect` on a sorted copy of remaining capacities to quickly find feasible bins. However, since we need indices and the list changes, keep a simple list but break early when possible.
+- **Alternative speedup**: For alpha=0 (pure greedy = BFD), implement a fast O(n log n) version using a sorted container simulation with bisect. For alpha>0, scan only bins with enough capacity.
+
+### 3. Rewrite Local Search - Bin Emptying
+
+Replace the current local search with a cleaner, more effective version:
+
+**Phase 1: Simple Redistribution (current approach, but cleaner)**
+- Sort bins by weight ascending.
+- For each bin (lightest first), try to place ALL its items into other bins using best-fit.
+- Use a sorted list of (remaining_capacity, bin_index) with bisect for O(log B) best-fit queries.
+- If all items placed, remove the bin. Mark `improved = True` and restart.
+
+**Phase 2: Swap-assisted Redistribution**
+- For each bin that couldn't be emptied in Phase 1 (still lightest first):
+  - For each item `a` in the source bin that couldn't be directly placed:
+    - For each other bin `b`, for each item `c` in bin `b` where `weight[c] < weight[a]`:
+      - Check if `a` fits in `b` after removing `c`: `remaining[b] + weight[c] >= weight[a]`
+      - Check if `c` can be placed in some other bin (including freed space in other bins from earlier placements in this attempt): best-fit search.
+      - If yes, execute the swap-and-place, continue trying to empty the source bin.
+  - If all items from source bin are placed (directly or via swaps), mark success.
+
+**Phase 3: Multi-item swap redistribution (for bins with ≤ 5 items)**
+- For the source bin, try all subsets of items that could be directly placed.
+- For remaining items (at most 2-3), try pairwise swaps with items in other bins.
+- Use backtracking with early termination.
+
+### 4. Local Search - Consolidation Moves
+
+After bin-emptying, perform consolidation to set up for future emptying:
+
+**Single-item transfer**: For each item in each bin, check if moving it to another bin results in a tighter fit (smaller residual in target). Only move if it increases the residual of the source bin (making it easier to empty later). Use a heuristic: move if `residual_target_after < residual_source_before - weight[item]`, i.e., the target becomes tighter than what the source would be without the item.
+
+**Pairwise swap**: For pairs of bins (i, j), try swapping item `a` from `i` with item `b` from `j` if:
+- Both bins remain feasible.
+- The max residual of the two bins decreases OR the min residual increases (better balance toward one full, one empty).
+- Specifically: prefer swaps that make one bin fuller (closer to capacity).
+
+Limit iterations: Do at most 2-3 rounds of consolidation, then retry bin-emptying.
+
+### 5. Reactive GRASP with Alpha Selection
+
+Replace random alpha selection with a reactive mechanism:
+- Maintain a score for each alpha value: `scores[alpha]` initialized to 1.0.
+- After each iteration, if solution has `num_bins` bins:
+  - Update score: `scores[alpha] += (best_num_bins / num_bins)^2` (reward alphas that find good solutions).
+- Select alpha with probability proportional to scores.
+- Every 50 iterations, mildly decay all scores (multiply by 0.9) to adapt over time.
+
+### 6. Solution Perturbation for Diversification
+
+Within GRASP (this is standard for GRASP):
+- After local search reaches a local optimum, if no improvement for 20 consecutive iterations:
+  - Take the best solution and perturb it: randomly remove 2-3 bins and re-insert their items using the randomized greedy construction.
+  - Apply local search to the perturbed solution.
+  - This acts as a GRASP restart with memory.
+
+### 7. Efficient Implementation Details
+
+- **bin_remaining array**: Use a simple Python list of integers. Avoid tuples; use parallel lists `bin_items[i]` and `bin_remaining[i]`.
+- **Best-fit lookup**: For construction, maintain a sorted list of (remaining, bin_index) and use `bisect_left` to find the smallest remaining capacity >= item weight. This gives O(log B) per item.
+- **Item weights array**: Convert to a tuple or keep as list for O(1) access.
+- **Time checks**: Check `time.time()` only every 10-20 iterations in inner loops, not every iteration. Use a counter.
+
+### 8. Time Budget Management
+
+- Use 98% of time_limit for the main loop (not 90%).
+- Within local search, check time every 50 inner iterations.
+- Run advanced local search (Phase 2 and 3) on every solution that ties or beats current best, not just strictly better ones.
+- If lower bound is reached, return immediately.
+
+### 9. Construction Variants
+
+Alternate between construction strategies within GRASP:
+- **Strategy 1 (70% of iterations)**: Items sorted by weight descending (FFD-style), best-fit with RCL.
+- **Strategy 2 (15% of iterations)**: Items sorted by weight descending, but with first-fit criterion (prefer first bin that fits) with RCL.
+- **Strategy 3 (15% of iterations)**: Slightly shuffled order - swap adjacent items with some probability before construction. This adds diversity.
+
+### 10. Overall Algorithm Flow
+
+```
+solve(bin_capacity, weights, time_limit):
+    compute lower_bound (L2)
+    pre-sort items by weight descending
+    initialize best_solution = FFD (alpha=0) + local_search
+    initialize alpha_scores
+    
+    while time < 0.98 * time_limit and best_num_bins > lower_bound:
+        select alpha via reactive probabilities
+        select construction strategy
+        solution = construct(alpha, strategy)
+        solution = local_search_phase1(solution)  # bin emptying
+        if num_bins(solution) <= best_num_bins:
+            solution = local_search_phase2(solution)  # swap-assisted emptying
+            solution = local_search_phase3(solution)  # consolidation + re-empty
+        update best if improved
+        update alpha_scores
+        
+        if no improvement for 20 iterations:
+            perturb best solution and apply local search
+    
+    return best_solution
+```
+
+### 11. Priority of Changes (implement in this order)
+
+1. Fix local search (biggest impact - current one is largely non-functional)
+2. Add bisect-based best-fit in construction for speed
+3. Add lower bound computation for early termination
+4. Implement swap-assisted bin emptying
+5. Implement reactive alpha selection
+6. Add consolidation moves
+7. Extend time budget to 98%
+8. Add perturbation-based diversification
+9. Add construction strategy variants

@@ -1,0 +1,207 @@
+## 1) Make the objective and acceptance criteria “bin-count first” everywhere
+### 1.1 Scoring
+- Keep lexicographic score `(num_bins, waste)` but:
+  - Use `waste = sum(bin_capacity - bw[b])` (equivalently `b*C - total_weight`) as you do; it’s constant for fixed `b`, so it doesn’t help within same bin count.
+  - Replace secondary metric with something that correlates with future bin elimination, e.g.:
+    - `sum((bin_capacity - bw[b])**2)` (lower is better; encourages tight bins and a few loose bins).
+    - Or `max(residual)` (smaller maximum slack tends to prevent “stranded” slack).
+- New score suggestion: `(bins, sum(residual^2), max(residual))`.
+- **Acceptance in local search**:
+  - Always accept any move that reduces `bins`.
+  - For same `bins`, accept if it improves the secondary metric, *or* if it increases the ability to empty some bin (see “promising bins” tracking below).
+
+### 1.2 Local search termination criteria
+- Replace the current fixed move budget with:
+  - A per-iteration time slice (e.g., local search runs until no improvement in `X` consecutive attempts, or until `t_slice` expires).
+  - `t_slice` adaptive: larger when a construction achieves near-best bin count.
+
+## 2) Strengthen GRASP construction (still greedy randomized)
+Construction is not the main bottleneck, but it can be improved to feed local search better states.
+
+### 2.1 Candidate bin evaluation: use “best-fit + lookahead” scores
+Instead of purely residual-after placement, compute a composite desirability:
+- Primary: minimal residual after.
+- Tie-breakers:
+  - Prefer bins that become “almost full” (residual <= small threshold).
+  - Avoid creating medium residuals that are hard to fill (e.g., residual in (C/3, C/2) depending on instance distribution).
+Implementation-ready: define `bin_key(b, w) = (residual_after, penalty(residual_after))` where `penalty` is a small piecewise value.
+
+### 2.2 RCL definition: based on percentile not min/max spread
+Your current `thr = best + alpha*(worst-best)` can be unstable when `worst` is huge.
+- Use a quantile-based RCL: take the top `k = max(2, int(alpha_k * len(feasible)))` bins by best-fit, then random choice among them.
+- Map your alpha list to `alpha_k` (e.g., alpha=0 -> k=1, alpha=1 -> k=len(feasible)).
+
+### 2.3 Diversify item order per iteration
+Right now `items` is pre-sorted once with random tie breaks. That reduces diversification.
+- Each construction should:
+  - Keep the global weights-desc ordering, but randomly shuffle within weight “buckets” (same weight) *each iteration*.
+  - Or perform a small number of random adjacent swaps (“perturbation”) before constructing.
+This is cheap and increases variety.
+
+## 3) Replace current local search with a bin-elimination local search (standard in bin packing GRASP)
+Goal: repeatedly try to eliminate one bin by redistributing its items into others (possibly with ejections).
+
+### 3.1 Data structures (crucial for speed)
+Maintain incrementally:
+- `packing`: list of lists.
+- `bw`: list of bin weights.
+- `res = C - bw[b]`.
+- `item_to_bin[i]` for O(1) bin lookup.
+- For fast “find bins that can accept weight w”:
+  - Maintain bins grouped by residual using buckets (0..C) if C is not too large; otherwise use sorted list of (residual, bin_id) updated on moves.
+  - Implementation-friendly without external libs: keep `bins_by_residual` as list of lists when `C <= 20000` (tune threshold), else maintain `sorted_bins` list and do linear scan on small candidate set.
+- Maintain “promising bins” order:
+  - Bins sorted by increasing `bw` (light bins are candidates to eliminate), but also track bins with many small items, etc.
+
+### 3.2 Core neighborhood A: direct relocate (improved)
+Upgrade `try_relocate`:
+- Always target **eliminating a bin**: pick `b_from` among the lightest bins (e.g., top 5–20 lightest, randomized).
+- For each item in `b_from`, attempt to place it into some other bin using best-fit.
+- Do *not* commit item-by-item greedily unless the whole bin can be emptied (see 3.4); otherwise you can get stuck in worse configurations.
+So direct relocate becomes either:
+- “test-only” feasibility check to empty bin, then apply; or
+- part of an ejection chain (next).
+
+### 3.3 Core neighborhood B: ejection chains (1–1 and 1–k) to enable bin emptying
+Standard approach: try to place an item `x` into a tight bin by ejecting one (or two) items that can be placed elsewhere.
+Implementation-ready outline:
+- Pick a candidate bin to eliminate `b0`.
+- Attempt to move an item `x` from `b0` into a target bin `bt` even if it doesn’t fit by:
+  - selecting an item `y` in `bt` such that swapping/ejecting makes room.
+- Then try to relocate `y` into another bin (possibly requiring another ejection), bounded depth `L` (e.g., 2 or 3).
+- Use DFS with pruning:
+  - Depth 1: try `x` into `bt` by ejecting one `y` and placing `y` directly somewhere.
+  - Depth 2: if not, allow ejecting `y` by ejecting `z` from another bin.
+- Stop as soon as you fully empty `b0`.
+- Keep chain small for speed: cap branching by considering only a few best candidate targets and a few heaviest eject candidates.
+
+Why this helps: near-optimal packings often require a small chain to free the exact slack needed.
+
+### 3.4 Core neighborhood C: bin emptying via small subset-sum fills (2–0 / 3–0 moves)
+This is the biggest missing piece.
+
+When trying to eliminate `b0`, you need to place its items into other bins. A powerful tactic is to move **multiple items as a group** to exactly fill residuals.
+
+Implementation plan:
+- Precompute for each bin `b` a small list of its items (weights) (already have packing).
+- For a chosen target bin with residual `r`, attempt to find:
+  - one item of weight `r` (easy),
+  - or two items summing to `r`,
+  - or three items summing to `r`.
+- Do this *from the union of items in b0 (and optionally one other bin)*.
+
+Efficient subset search (no external libs):
+- For the candidate pool of items (typically small—items in one bin, maybe two), build:
+  - dictionary `w -> item` for singles,
+  - dictionary `w1+w2 -> (item1,item2)` for pairs (O(m^2) with m maybe 10–40),
+  - optional triples via looping one item and checking pair sums (O(m^2)).
+- Restrict m by selecting only the lightest/heaviest K items in b0 or in a chosen “donor” bin.
+
+Use:
+- Try to fill large residuals first, because they’re harder.
+- When a match is found, perform the multi-move and update structures.
+
+This neighborhood is standard in bin packing improvement heuristics and fits naturally as GRASP local search.
+
+### 3.5 Core neighborhood D (Large Neighborhood Search inside GRASP local search): “repack a small set of bins optimally-ish”
+Within GRASP, it is standard to use a stronger local improvement that re-optimizes a restricted subproblem.
+
+Mechanism:
+- Select `k` bins (e.g., 3–6 bins):
+  - Always include the current lightest bin (candidate to eliminate) plus a few bins with the largest residuals.
+- Remove all items from these bins into a pool.
+- Repack the pool using a strong deterministic heuristic (e.g., best-fit decreasing) *into as few bins as possible*, starting by trying `k-1` bins (i.e., can we eliminate one bin?), then `k`.
+- If repack uses fewer bins than before, accept immediately.
+- Else if same bin count but better secondary metric, optionally accept.
+
+Because k is small, this is fast and very effective at shaving the last bins.
+
+Implementation detail:
+- The repack routine can be a mini-BFD using the same data structures but isolated; no recursion required.
+
+## 4) Make alpha selection reactive and use an elite set (standard GRASP enhancement)
+### 4.1 Reactive GRASP for alpha
+Instead of fixed random choice among alphas:
+- Maintain for each alpha value:
+  - `count[a]`, `avg_improvement[a]` (or `avg_score[a]`).
+- Sample alpha with probability proportional to its performance (softmax or roulette).
+- Update every `W` iterations.
+This concentrates time on the best-performing greediness level on the current instance distribution.
+
+### 4.2 Elite solutions and path-relinking (optional but standard in GRASP)
+If you can afford complexity, add **path relinking** between current best and a newly found good solution (elite pool of size 5–10).
+- Represent a solution by an assignment `item_to_bin`.
+- Define distance as number of items assigned to different bins (or bin signature differences).
+- Generate intermediate solutions by gradually transforming one assignment towards the other, applying local search on a few intermediate points.
+- Accept if improved.
+
+If path relinking is too heavy, still keep an elite set and periodically restart construction using information from elite (e.g., preserve some “good” bins).
+
+## 5) Iteration/time budgeting to exploit up to 100 seconds
+Your current loop is tuned to stop at 40s; new environment allows 100s.
+
+### 5.1 Fixed iteration budget + periodic time checks
+- Choose a higher fixed `max_iter` (e.g., 8000–20000 depending on n), but still return early if time exceeded.
+- Check time every iteration (cheap) or every 5 iterations; given 100s, still fine.
+
+### 5.2 Two-phase schedule
+- Phase 1 (diversification): first 60–70% iterations use broader alpha distribution and shorter local search slices.
+- Phase 2 (intensification): remaining iterations bias toward best alpha(s), spend more time in bin-elimination neighborhoods and LNS repacks.
+
+### 5.3 Adaptive local search depth based on proximity to best
+If constructed solution has bin count <= best_bins + 1:
+- run the heavy neighborhoods (3.3–3.5) longer.
+Else:
+- only light improvements (quick relocate/swap) and move on.
+
+## 6) Correctness and robustness improvements (won’t hurt performance)
+- Enforce feasibility: if any `w > C`, return a clear infeasible packing convention (or raise). Since prompt says assume feasible, simplest: place item alone but it violates capacity; better: still handle by immediate return with empty packing? Decide and document. (But for competitive setting, assume feasible and assert in debug comments.)
+- After every destructive operation (bin removal), carefully maintain:
+  - `item_to_bin` updates
+  - bin indices shifts
+To avoid O(n) index fixes on pop, consider “lazy bins” (mark empty) or swap-with-last when removing bins; maintain mapping accordingly.
+
+## 7) Concrete local-search control flow (implementation-ready)
+For each GRASP iteration:
+1. Construct solution with chosen alpha.
+2. Local search loop (time-sliced):
+   - Attempt bin elimination repeatedly:
+     - Select candidate bins `B0` = few lightest bins (random order).
+     - For each `b0`:
+       1) Try direct emptying by greedy relocation (fast).
+       2) Try subset-sum multi-moves (2–0, 3–0).
+       3) Try ejection chain depth 2–3.
+       4) Try LNS repack on selected k bins.
+       - If any step reduces bin count: restart from new lightest bin.
+   - If no bin elimination found, optionally apply a small number of “tightening” swaps (your residual-squares criterion is fine) to prepare for later elimination.
+3. Update best and elite structures.
+
+## 8) Micro-optimizations that matter in Python
+- Avoid repeated `sum(weights[i] for i in bin)` except at the very end.
+- Replace `packing[b].remove(it)` (O(m)) with position-tracking per bin if you often remove; or accept O(m) but keep bins small by focusing on small candidate sets. Practical approach:
+  - Maintain `pos_in_bin[i]` index inside its bin list; on removal, swap with last element to O(1) update.
+- Avoid sorting full lists inside tight loops:
+  - keep a small “best K targets” by linear scan.
+- Time check: use a counter and check every `k` inner operations, not every operation.
+
+## 9) Validation/measurement plan
+- Track per-iteration stats (in local variables, not printed):
+  - best bins over time, acceptance rates per move type, alpha performance.
+- Use these to tune:
+  - candidate counts (how many bins to try, how many targets per item)
+  - ejection depth
+  - LNS k
+
+## 10) Parameter suggestions (starting point)
+- `alphas = [0.0, 0.1, 0.25, 0.5, 0.75, 1.0]` with reactive probabilities.
+- Candidate light bins to attempt eliminating: 10 (or `min(20, m)`).
+- Ejection chain depth: 2 (enable 3 only late in time).
+- LNS repack bins k: 4 or 5.
+- Subset-sum attempts: pairs always, triples only if b0 not emptied and time remains.
+
+---
+If you implement only two things from this plan, make them:
+1) Bin-elimination local search with multi-item (2–0/3–0) moves and limited ejection chains.
+2) Small-bin-set repacking (LNS) to directly remove a bin.
+
+These directly target the remaining 2–3% gap and typically produce the biggest reduction in extra bins near the lower bound.

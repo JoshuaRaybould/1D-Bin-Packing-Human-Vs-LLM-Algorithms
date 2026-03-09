@@ -1,0 +1,15 @@
+greedy_randomised_adaptive_search_procedure_0_initial : CORRECT
+greedy_randomised_adaptive_search_procedure_0_post_plan : CORRECT
+greedy_randomised_adaptive_search_procedure_0_performance_3 : Time limit given to the algorithm was not respected.
+greedy_randomised_adaptive_search_procedure_0_performance_4 : Time limit given to the algorithm was not respected.
+greedy_randomised_adaptive_search_procedure_1_initial : CORRECT
+greedy_randomised_adaptive_search_procedure_1_post_plan : INVALID_ANSWER: bin capacity exceeded
+greedy_randomised_adaptive_search_procedure_1_performance_3 : INVALID_ANSWER: bin capacity exceeded
+greedy_randomised_adaptive_search_procedure_1_performance_4 : CORRECT
+greedy_randomised_adaptive_search_procedure_2_initial : CORRECT
+greedy_randomised_adaptive_search_procedure_2_post_plan : CORRECT
+greedy_randomised_adaptive_search_procedure_2_performance_3 : CORRECT
+greedy_randomised_adaptive_search_procedure_2_performance_4 : Time limit given to the algorithm was not respected.
+greedy_randomised_adaptive_search_procedure_0_post_plan : best 1.0253833972601532
+
+During testing this would not work on occasion, so we use the next best: greedy_randomised_adaptive_search_procedure_2_performance_3.py, with ratio: 1.0268459156318575

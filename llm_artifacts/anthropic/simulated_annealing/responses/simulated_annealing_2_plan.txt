@@ -1,0 +1,112 @@
+## Detailed Implementation Plan
+
+### 1. Data Structure Optimization
+
+Replace the current bin content lists with O(1)-removal structures:
+- **`item_bin[i]`**: int array mapping each item to its current bin index
+- **`bin_items[b]`**: list of item indices in bin b
+- **`item_pos[i]`**: position of item i within `bin_items[item_bin[i]]` (enables O(1) swap-with-last removal)
+- **`bin_loads[b]`**: int array of current load per bin
+- **`bin_count[b]`**: number of items in bin b (or just use len(bin_items[b]))
+
+For removal of item `i` from bin `b`:
+```
+last = bin_items[b][-1]
+pos = item_pos[i]
+bin_items[b][pos] = last
+item_pos[last] = pos
+bin_items[b].pop()
+```
+This makes every move O(1) instead of O(items_per_bin).
+
+### 2. Best Solution Tracking
+
+Instead of copying all bins on every improvement, store `best_item_bin = item_bin[:]` (just an n-length array copy). Reconstruct `packing` and `bin_weights` only at the very end from `best_item_bin`. This reduces per-improvement overhead from O(n + num_bins) with list-of-list copying to O(n) with a flat array copy.
+
+### 3. Move Types (Redesigned)
+
+**Move 1 - Targeted Relocate (50% probability):**
+- Select source bin weighted toward least-loaded bins: pick 2-3 random bins, choose the one with smallest load
+- Pick a random item from that bin
+- Select destination: pick 2-3 random bins (excluding source), choose the one where the item fits most tightly (highest load + item weight ≤ C)
+- If no sampled bin fits, skip
+- Compute delta cost and apply SA acceptance criterion
+
+**Move 2 - Random Swap (15% probability):**
+- Pick two random items from different bins
+- Check feasibility of swapping
+- Compute delta and apply acceptance
+
+**Move 3 - Bin Emptying Attempt (35% probability):**
+- Find the least loaded bin (maintain a simple scan, or track it incrementally)
+- For each item in that bin (iterate in random order), find the best-fit destination among all other bins
+- If ALL items can be placed, execute the entire redistribution as one compound move (always accept since it reduces bin count)
+- If not all items can be placed, try moving as many as possible (each as individual SA moves with favorable acceptance)
+- This is the primary bin-reduction mechanism
+
+### 4. Temperature Schedule
+
+Use a time-based temperature schedule exclusively (no alpha multiplication between checks):
+- Check time every 200 iterations (reduced from 500 for more accurate scheduling)
+- `T = T_start * (T_end / T_start) ^ progress` where `progress = elapsed / total_time`
+- `T_start = 0.3 * C * C` (slightly lower than current to avoid too much randomness)
+- `T_end = 0.01`
+- Between time checks, interpolate T linearly based on iteration count since last check
+
+### 5. Reheat/Restart Mechanism
+
+After a long period without improvement (e.g., 50,000 iterations with no new best bin count):
+- Restore best solution found so far
+- Reheat temperature to `T_start * 0.3` (partial reheat)
+- This allows escaping from local optima
+- Limit reheats to ~5 times total to ensure convergence toward the end
+
+### 6. Initial Solution
+
+Keep FFD as the primary initial solution, but also:
+- Try Best Fit Decreasing (BFD): for each item (sorted descending), place in the bin with the least remaining capacity that still fits
+- Compare the two and start SA from the better one (fewer bins, or same bins with higher sum-of-squares)
+- This takes negligible extra time but may give a better starting point
+
+### 7. Periodic Compaction Pass
+
+Every 10,000 iterations, do a quick deterministic pass:
+- Sort bins by load ascending
+- For each bin starting from the least loaded, try to redistribute all its items to other bins (best-fit)
+- If successful, eliminate the bin
+- This is complementary to Move 3 and handles cases where multiple items from one bin need coordinated placement
+
+### 8. Implementation Outline
+
+```
+def solve(bin_capacity, weights, time_limit):
+    # 1. Setup and edge cases
+    # 2. Compute FFD and BFD solutions, pick better
+    # 3. Initialize O(1) data structures (item_bin, bin_items, item_pos, bin_loads)
+    # 4. Compute initial cost
+    # 5. SA main loop:
+    #    - Time check every 200 iterations
+    #    - Select move type by random threshold
+    #    - Execute move with O(1) data structure operations
+    #    - SA acceptance with precomputed temperature
+    #    - Track best via item_bin copy
+    #    - Reheat if stuck
+    #    - Periodic compaction every 10K iterations
+    # 6. Reconstruct packing from best_item_bin
+    # 7. Return result
+```
+
+### 9. Performance Expectations
+
+- O(1) moves instead of O(k) should roughly 3-5x the iteration throughput
+- Targeted bin emptying (Move 3) directly attacks the objective (bin count)
+- Reheat mechanism prevents permanent stagnation
+- Better initial solution from BFD comparison
+- Expected improvement: reduce ratio from 1.013 to ~1.005-1.008
+
+### 10. Time Budget Allocation
+
+- Initial solution computation: <0.1s
+- SA with all optimizations: use 98% of remaining time
+- Final reconstruction: <0.01s
+- Time check frequency of 200 iterations balances overhead vs. responsiveness

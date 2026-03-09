@@ -1,0 +1,110 @@
+## Detailed Implementation Plan
+
+### 1. Improve Lower Bound (L2 Martello-Toth)
+
+Replace the simple continuous lower bound with the L2 bound:
+- For each threshold α from 1 to C/2, count items larger than C/2 (N1), items in (C-α, C/2] (N2), and compute remaining capacity vs items in (0, α] (N3 contribution).
+- L2 = max over all α of: N1 + N2 + max(0, ceil((sum_of_small_items - remaining_cap_in_N1_N2_bins) / C))
+- This gives significantly tighter bounds and enables earlier termination.
+- To keep it fast, discretize: iterate over distinct weight values as thresholds rather than all integers 1..C/2.
+
+### 2. Efficient Data Structures
+
+- Maintain a sorted list of `(remaining_capacity, bin_index)` alongside the bin lists.
+- Use `bisect` module to quickly find best-fit bin for an item (find leftmost bin with remaining >= w, then among candidates find the tightest fit).
+- This reduces best-fit insertion from O(num_bins) to O(log(num_bins)) for initial construction and reinsertion.
+- Specifically: keep `remaining` as a separate array; for best-fit queries, use a simple sorted list approach or just iterate (for moderate bin counts, sorting once may suffice).
+
+### 3. Restructured Local Search with Time Budgeting
+
+Split local search into phases with explicit time checks:
+
+**Phase A - Bin Elimination (primary objective):**
+- Sort bins by weight ascending.
+- For each candidate bin (lightest first), attempt to redistribute all its items to other bins using best-fit.
+- Enhancement: before giving up on a bin, try (1,1)-swaps: for each item x in the source bin that doesn't fit anywhere, check if swapping x with some item y in a target bin would make both x and y fit (x goes to target, y goes to another bin or stays displaced to be placed later).
+- Time budget: allocate up to 40% of remaining time.
+
+**Phase B - Consolidation (secondary objective - improve fill scores):**
+- Single item relocations: move item from src to tgt if it improves sum-of-squares.
+- (1,1)-swaps: swap items between two bins if it improves sum-of-squares.
+- (2,1)-exchanges: move 2 items from bin A and 1 item from bin B such that the 1 item fits in A and the 2 items fit in B, improving balance.
+- Time budget: allocate up to 20% of remaining time per local search call.
+- Limit iterations and check time every N operations.
+
+### 4. Enhanced Shaking Neighborhoods
+
+Redesign shake operators for better exploration:
+
+- **k=1**: Move 1 random item to a random feasible bin (keep).
+- **k=2**: Swap 2 items between 2 bins (keep).
+- **k=3**: Chain move - pick random item, move it to random feasible bin, then move a random item from that bin to another feasible bin.
+- **k=4**: Empty 1 lightest bin, redistribute with randomized best-fit (randomly choose between best-fit and second-best-fit).
+- **k=5**: Empty 2 lightest bins, redistribute with randomized order and best-fit.
+- **k=6**: Empty 3 lightest bins, redistribute.
+- **k=7**: Pick 2 random bins, merge their items, repack using subset-sum-like greedy into 1 fewer bin if possible, otherwise redistribute.
+- **k=8**: Destroy random 20% of bins, rebuild with FFD.
+- **k=9**: Destroy random 30% of bins, rebuild with BFD.
+- **k=10**: Destroy 40% of bins (random selection), rebuild items with randomized heuristic.
+
+### 5. Multiple Initial Solutions
+
+- Generate FFD, BFD, and also a randomized variant (GRASP-like: among top-3 candidate bins, pick randomly) run 3-5 times.
+- Apply quick local search (Phase A only, limited iterations) to each.
+- Pick the best as starting solution.
+- Time budget: at most 10% of total time for initialization.
+
+### 6. Improved VNS Main Loop
+
+- Use **General VNS (GVNS)** structure: shake → local search → accept/reject.
+- Acceptance: accept if score is strictly better OR if score is equal (same bin count) but fill-score is better (already done via tuple comparison).
+- After exhausting k_max, restart from best solution with a large perturbation (destroy 25-50% of bins randomly).
+- Track stagnation: if no improvement for multiple restarts, increase destruction percentage.
+- Adaptive k_max: start with k_max=10, if problem is large (>500 items) use k_max=7 to spend less time in weak neighborhoods.
+
+### 7. Time Management
+
+- Total time budget: `time_limit` (use 97% to be safe).
+- Initialization phase: up to 10% of budget.
+- VNS iterations: remaining 87% of budget.
+- Each local search call: check time every 100 operations (bin scans). If time is short, do only Phase A (bin elimination).
+- On large instances (>1000 items): reduce local search depth (fewer move rounds, skip Phase B consolidation moves).
+
+### 8. Targeted Bin Reduction Strategy
+
+Add a specialized procedure called periodically (every few VNS iterations):
+- Identify the bin with the smallest total weight.
+- For each item in that bin, compute a "displacement score": how much spare capacity exists across all other bins for that item.
+- If total displacement score suggests feasibility, attempt redistribution with backtracking (try up to 1000 combinations).
+- Use recursive best-fit with limited backtracking depth (2-3 levels).
+
+### 9. Implementation Order & Priority
+
+1. **Highest impact**: Efficient local search with (1,1)-swaps in bin elimination phase (#3 Phase A)
+2. **High impact**: Better shaking neighborhoods, especially the destroy-and-rebuild ones (#4, k=7-10)
+3. **High impact**: Multiple initial solutions (#5)
+4. **Medium impact**: L2 lower bound (#1)
+5. **Medium impact**: Consolidation moves (#3 Phase B)
+6. **Medium impact**: Better time management (#7)
+7. **Lower impact**: Efficient data structures with bisect (#2) - only if instances are large
+8. **Lower impact**: Targeted bin reduction (#8)
+
+### 10. Code Structure
+
+```
+def solve(bin_capacity, weights, time_limit):
+    # Setup, lower bound computation (L2)
+    # Generate multiple initial solutions (FFD, BFD, randomized)
+    # Quick local search on each, pick best
+    # VNS main loop:
+    #   k = 1
+    #   while k <= k_max and time_left:
+    #     shake(current, k)
+    #     local_search(shaken) with time budget
+    #     if improved: update current/best, k=1
+    #     else: k += 1
+    #   Large perturbation restart from best
+    # Return best solution
+```
+
+Key constraint: local search is a standard essential component of VNS, so its inclusion is appropriate and required.

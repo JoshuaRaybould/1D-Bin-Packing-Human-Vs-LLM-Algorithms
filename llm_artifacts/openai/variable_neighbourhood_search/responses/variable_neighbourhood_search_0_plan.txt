@@ -1,0 +1,278 @@
+## 1) Reframe objective and acceptance to focus on bin-count improvements
+
+### 1.1 Primary objective stays #bins; change tie-breakers to drive future bin elimination
+Current objective: (num_bins, waste, -sum_squares(loads)). This is okay, but it doesn’t strongly favor *creating slack in a small number of bins* which helps absorb an entire bin later.
+
+Implementation-ready change:
+- Maintain objective as a tuple comparable with `<`.
+- Use: 
+  1) `num_bins`
+  2) `waste` (same)
+  3) **maximize “slack concentration”**: maximize sum of squares of *free space* (or equivalently minimize negative of that). Free space per bin `fs[b] = C - load[b]`. Concentrating free space into fewer bins helps absorb items from a target bin.
+
+Proposed tuple:
+- `obj = (num_bins, waste, -sum((C - load)^2 for load in loads_nonempty))`
+
+Keep it cheap by tracking this incrementally (see §2).
+
+### 1.2 Acceptance rule: allow non-improving moves inside VND pass only if they enable bin elimination
+VND is currently strictly improving. Near local optimum, you need small deteriorations to create a bin-closing opportunity.
+
+Still keep VNS structure, but inside each VND neighborhood implement a **limited “aspiration”**:
+- If a move doesn’t improve objective, allow it only when it increases a “bin-closure potential” metric, e.g. increases total free space in top-K fullest bins, or reduces load of a selected target bin.
+- Cap such accepted sideways moves per pass (e.g., 10–30) to prevent drift.
+
+This remains within standard VNS/VND practice (strategic oscillation is common), but keep it minimal.
+
+---
+
+## 2) Fix performance bottlenecks: incremental evaluation + O(1) removals
+You’re spending too much time in:
+- `current_obj()` rebuilding lists and scanning bins
+- `remove_item_from_bin()` uses `lst.index(it)` = O(size_of_bin)
+- Frequent sorting of bins and destination lists
+
+### 2.1 Maintain per-bin item positions for O(1) remove
+Maintain:
+- `pos_in_bin[item] -> index within bins[bin]`.
+When removing with swap-remove:
+- idx = pos_in_bin[it]
+- swap with last item; update its position
+- pop; update pos_in_bin[it] = -1 temporarily.
+
+This single change makes relocate/swap neighborhoods much faster.
+
+### 2.2 Maintain a live set/list of non-empty bins and bin count
+Maintain:
+- `nonempty_bins` as a list plus `is_nonempty[b]` boolean, OR a `set` plus a cached list for iteration.
+- `num_bins` current number of non-empty bins (update when a bin becomes empty/non-empty).
+
+### 2.3 Incremental objective deltas
+Track:
+- `sum_loads = total weight` is constant.
+- `waste = num_bins*C - sum_loads` depends only on num_bins.
+- Third term: `slack_sq_sum = sum((C-load[b])^2 for nonempty bins)`.
+Update in O(1) on relocate/swap by adjusting only impacted bins.
+
+Then objective compare becomes O(1) without scanning bins.
+
+### 2.4 Reduce sorting overhead by using bucketed iteration
+Instead of sorting bin_ids by load each time:
+- Maintain bins in coarse load buckets (e.g., by free space or by load // bucket_size).
+- Or simpler: periodically (every X moves) rebuild a list of bins sorted by free space; reuse between attempts.
+
+Goal: stop sorting inside tight loops.
+
+---
+
+## 3) Strengthen the neighborhoods (VND) to actually reduce bin count
+Keep VND as a sequence of neighborhoods, but upgrade them to standard powerful bin packing neighborhoods.
+
+### Neighborhood order (recommended)
+1) **Bin elimination (1-bin destroy/repair)**: attempt to empty one chosen bin by relocating its items using best-fit with backtracking depth 2–3.
+2) **Ejection chain relocate (chain length 3–6)**: relocate an item into a bin by ejecting another item, continuing.
+3) **2-1 exchange**: move 2 items from bin A into bin B while moving 1 item from B back to A (capacity-feasible). Classic strong neighborhood.
+4) **2-2 swap** (pair swap) as fallback.
+5) Simple relocate / 1-1 swap (what you have) as cheap finishing.
+
+You already have (relocate, 1-1 swap, and a weak 2-0). The big missing pieces are (a) bin elimination done properly, and (b) 2-1 exchanges / ejection chains.
+
+### 3.1 Dedicated bin-elimination procedure (core improvement)
+This should become the main intensification step.
+
+Procedure `try_eliminate_bin(b_from)`:
+- Let `items = bins[b_from]`.
+- Sort items by decreasing weight.
+- Try to pack these items into *other bins* using a fast best-fit structure:
+  - Candidate destination bins prioritized by minimal residual after placement.
+  - Use limited backtracking:
+    - Depth-1: greedy assignment
+    - If fail, depth-2: for one hard item, try alternative dest among top R bins (R~6–10)
+    - Optionally depth-3 for very small bins (<=6 items)
+- Only commit if all items placed and bin becomes empty => `num_bins-1`.
+
+Important implementation details:
+- Limit attempts per VND pass (e.g., try 10–30 bins, starting from smallest load bins; also occasionally a random bin).
+- Maintain a candidate list of bins with sufficient free space; avoid scanning all bins each time.
+
+This directly targets the metric you care about: reducing bins.
+
+### 3.2 Ejection chains (relocate with displacement)
+Standard in bin packing local search: move item x into bin B; if overflow, evict one item y from B to another bin, etc.
+
+Implementation plan:
+- Function `ejection_chain(start_item, max_depth)`:
+  - Choose a destination bin `b_to` where placing start_item is “almost feasible” (free space deficit small) OR feasible but yields better consolidation.
+  - If infeasible, select an item to eject from b_to (try a few candidates: lightest/heaviest depending on deficit).
+  - Continue chain up to depth D; if at some point an item can be placed feasibly into some bin, terminate successfully.
+- Evaluate success by either:
+  - bin elimination (best), or
+  - improving secondary objective.
+
+Practical constraints:
+- Keep D small (3–6) and branching tiny (try 2–3 ejected candidates each level).
+- Use recursion or iterative stack; store performed moves to rollback quickly.
+
+### 3.3 2-1 exchange neighborhood
+This is often the missing step between swap and bin elimination.
+
+For bins A (donor) and B (receiver):
+- Pick two items (i,j) in A and one item k in B.
+- Feasible if:
+  - loadB - w(k) + w(i)+w(j) <= C
+  - loadA - w(i)-w(j) + w(k) <= C
+
+Search strategy (fast):
+- Focus A as small/medium load bins (good donors to empty) and B as bins with enough slack.
+- Precompute in each bin a short list of candidate items (top t heaviest and top t lightest, t~6–10).
+- For a given (A,B), enumerate pairs from candidate list in A (<=~45 pairs) and k from candidates in B.
+- Stop at first improvement or first bin-elimination.
+
+### 3.4 Improve your existing 2-0 (empty a bin by moving two items)
+Your current 2-0 is greedy and doesn’t consider interaction (first move changes free spaces). Upgrade it:
+- For a chosen bin, attempt to place its items using a limited **matching** approach:
+  - For 2 items, try all combinations of top R destination bins for item1 and item2 with rollback.
+  - Generalize to up to 3 items for tiny bins.
+
+But once §3.1 is implemented, this “2-0” becomes redundant; you can drop it or keep it as a cheap special case.
+
+---
+
+## 4) Upgrade shaking: from random moves to ruin-and-recreate (still VNS)
+Current shaking is mostly random relocate/swap; it rarely changes the macro-structure.
+
+Replace with structured shaking operators, parameterized by k (neighborhood size):
+
+### 4.1 Ruin: remove a set of items, then reinsert by best-fit (recreate)
+For a given k:
+- Choose `r = base + alpha*k` items to remove (e.g., r = 8 + 4k, cap at 60).
+- Removal selection (mix strategies):
+  1) items from 1–3 **smallest bins** (promote elimination)
+  2) items with weights in a tight range (hard-to-place group)
+  3) random items from 2–3 bins (diversity)
+- Remove items (update loads, nonempty bins). Keep empty bins allowed.
+- Reinsert using **best-fit decreasing** on removed items:
+  - sort removed items by weight desc
+  - insert into bin that leaves minimum residual; if none fits, open a new bin.
+
+This is a standard, highly effective VNS shaking for bin packing and creates states from which VND can empty bins.
+
+### 4.2 Bin-based shaking
+Alternate shaking type:
+- Pick 1–k bins at random (biased to small bins), remove all their items, then reinsert with best-fit.
+
+This directly explores “k-bin neighborhoods” in the VNS sense.
+
+### 4.3 Keep a small probability of simple random swap/relocate
+Retain ~10–20% chance to apply a few random swaps/relocates to avoid always reconstructing similarly.
+
+---
+
+## 5) Better initial solutions and multi-start within the same VNS framework
+Initial solution quality strongly affects final bins when time is limited.
+
+### 5.1 Generate multiple initial packings, pick best, then start VNS
+Within `solve`, spend an initial budget (e.g., min(5% of time_limit, 2s)) to build, say, 10–30 candidates:
+- FFD
+- BFD (best-fit decreasing)
+- “Almost-worst-fit” variant (to diversify)
+- Randomized tie-breaking within equal weights (keep)
+Pick the best objective (fewest bins, then best tie-breaker) and start VNS from it.
+
+This is not a different metaheuristic; it’s standard for VNS to start from a good initial solution.
+
+### 5.2 Periodic restart (but keep best-so-far)
+After X iterations without bin-count improvement, restart current solution from:
+- best solution + strong shaking (ruin many items), or
+- a fresh randomized BFD solution.
+
+Still VNS: you’re just reinitializing the current point.
+
+---
+
+## 6) Scheduling: iteration budget + time checks (and use up to 100s)
+Hard requirement: fixed number of iterations + periodic time checks.
+
+### 6.1 Update time usage behavior
+Given there is no penalty and execution stops at 100s, set the algorithm to *attempt* to use `min(time_limit, 100)` effectively.
+- Treat `effective_limit = min(time_limit, 100.0)`.
+- Keep checking `time.time() - start > effective_limit`.
+
+### 6.2 Iteration structure
+Use a fixed outer loop `for it in range(MAX_ITERS):`.
+Inside:
+- choose k from 1..k_max
+- apply shaking(k)
+- run VND until local optimum or a move budget
+
+Recommended parameters to start (tune empirically):
+- `k_max = 20` (larger because shaking is now meaningful)
+- `MAX_ITERS = 2000` (will stop early by time)
+- VND move budget per call rather than max_passes: e.g., attempt up to `M = 2000` candidate moves or `M = 200 * num_bins` scaled, whichever smaller.
+
+Time checks:
+- Check time every N operations (e.g., every 200 inner attempts) to reduce overhead.
+
+---
+
+## 7) Candidate selection: don’t scan all bins/items
+To convert time into bin reductions, every neighborhood must focus search.
+
+### 7.1 Maintain “difficult bins” lists
+Maintain indices for:
+- smallest-load bins (top S)
+- bins with largest free space (top S)
+- bins with near-full load (top S)
+Update lazily every T moves or after rebuild.
+
+### 7.2 Item candidate lists per bin
+For each bin keep (computed on demand):
+- heaviest t items
+- lightest t items
+Used by 2-1 and ejection chain.
+
+### 7.3 Fast destination filtering
+When placing an item of weight w:
+- Consider only bins whose free space >= w.
+- Keep bins grouped by free space buckets; maintain bucket arrays of bin ids.
+This avoids scanning all bins and sorting destination lists.
+
+---
+
+## 8) Solution “rebuild/compaction” correctness and frequency
+Reindexing bins is good but currently random and sometimes inconsistent with performance.
+
+Plan:
+- Avoid frequent full rebuilds; they are O(n).
+- Trigger compaction when:
+  - number of empty bins exceeds threshold (e.g., > 10% of bins) OR
+  - after a successful bin elimination OR
+  - every fixed number of accepted moves (e.g., every 500).
+
+When rebuilding:
+- Rebuild `bins`, `loads`, `assign`, `pos_in_bin`, `nonempty_bins`.
+
+---
+
+## 9) What to measure during development (to validate improvements)
+Even without changing API, you can self-assess quickly:
+- Count how many times VND achieves `num_bins` reduction per second.
+- Track which neighborhood produced bin eliminations.
+- Track average cost per attempt in each neighborhood.
+
+Success criteria aligned to your feedback:
+- Reduce “extra bins over LB” significantly by enabling repeated bin eliminations.
+- Improve average ratio from ~1.018 toward ~1.010 or better (instance-dependent).
+
+---
+
+## 10) Concrete implementation sequence (low risk first)
+1) Data structure upgrades (§2.1–2.3): pos_in_bin, incremental objective, nonempty bin count.
+2) Replace shaking with ruin-and-recreate (§4.1) while keeping your existing VND to see immediate gains.
+3) Implement dedicated bin elimination neighborhood (§3.1) and make it the first neighborhood in VND.
+4) Add 2-1 exchange (§3.3).
+5) Add ejection chains (§3.2) if time remains; this is the most complex but often yields the last few bin reductions.
+6) Add multi-start initial solutions (§5.1) and periodic restart (§5.2).
+7) Tune parameters and time-check cadence (§6).
+
+This sequence is implementation-ready, stays within VNS/VND, respects the hard requirements, and specifically targets the gap implied by your results: the algorithm is close, but it needs stronger bin-elimination moves and more efficient inner-loop mechanics to convert 40–100 seconds into fewer bins.

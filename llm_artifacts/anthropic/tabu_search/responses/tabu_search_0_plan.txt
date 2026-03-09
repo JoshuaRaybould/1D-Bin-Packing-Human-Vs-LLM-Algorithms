@@ -1,0 +1,153 @@
+# Improvement Plan for Tabu Search Bin Packing
+
+## 1. Tighter Lower Bound (L2 - Martello-Toth)
+
+**Why**: The current L1 bound (ceil of total_weight/capacity)) is weak. We may be wasting time trying to achieve targets that are provably impossible.
+
+**What**: Implement the L2 lower bound:
+- For a parameter α (iterate over useful values), partition items into three groups:
+  - Large: items with weight > C/2 (where C = capacity)
+  - Medium: items with weight in (C - α, C/2]
+  - Small: items with weight in (0, α] (approximately)
+- L2 = max over α of: |large| + |medium| + max(0, ceil((sum_small - slack_from_large_medium_bins) / C))
+- Take max(L1, L2) as the lower bound.
+
+**Implementation**: Before the main loop, compute L2 and use it as `lb`.
+
+## 2. Data Structure Optimization
+
+**Why**: `list.remove(idx)` is O(n). This is called every iteration and is a major bottleneck.
+
+**What**: 
+- Use `set` for `bin_items[b]` instead of `list` for O(1) add/remove/membership.
+- Maintain `item_bin[idx]` array for O(1) lookup of which bin an item is in.
+- Convert sets to lists only when returning results.
+- When iterating over candidates, convert to list temporarily or use `random.sample` on a list copy maintained in parallel.
+
+**Alternative**: Keep both a list and a set per bin, or simply use lists but swap-and-pop for O(1) removal by maintaining index positions.
+
+**Decision**: Use lists with an index-position map: `bin_items_pos[idx]` stores the position of item `idx` in its bin's list. On removal, swap with last element and pop. This gives O(1) removal while keeping random sampling easy.
+
+## 3. Time Management Overhaul
+
+**Why**: Currently only using 28.8s of 40s. The problem states no penalty for longer runtimes up to 100s.
+
+**What**:
+- Set `hard_deadline = start_time + time_limit * 0.98` (use nearly all time).
+- For each target, allow **multiple restarts** rather than one attempt:
+  - First attempt: 50% of remaining time
+  - Second attempt (different init): 50% of remaining time after first attempt
+  - Continue until time runs out or target achieved
+- When a target is achieved, immediately try the next target.
+- Reduce `check_freq` to 200-500 to balance time-checking overhead vs responsiveness.
+
+## 4. Multi-Start with Diverse Initializations
+
+**Why**: A single FFD-based initialization may trap the search in a local region.
+
+**What**: For each restart within a target, use a different initialization:
+- **Init 1**: FFD best-fit into target bins (current)
+- **Init 2**: Random order, first-fit into target bins
+- **Init 3**: Sorted by weight ascending, best-fit into target bins  
+- **Init 4**: Random perturbation of FFD: take FFD solution, randomly swap 20% of items between bins
+- **Init 5**: Load-balancing init: distribute items to equalize bin weights, then fix overflow
+
+Cycle through these on successive restarts.
+
+## 5. Improved Objective Function
+
+**Why**: Simple sum of overflow treats one bin with overflow 10 the same as 10 bins with overflow 1 each. The latter is harder to fix.
+
+**What**: Use **squared overflow** as the objective: `sum(max(0, bin_wt[b] - capacity)^2)`. This encourages the search to spread overflow across bins and then reduce it, making solutions easier to reach.
+
+**Implementation**: 
+- Change `compute_overflow` to return sum of squared overflows.
+- Update delta calculations: `delta = new_source_overflow^2 - old_source_overflow^2 + new_dest_overflow^2 - old_dest_overflow^2`.
+- Feasibility check remains `all bin_wt[b] <= capacity`.
+
+## 6. Enhanced Neighborhood Structure
+
+**Why**: Current neighborhood is limited - only moves from overflowing bins, limited swap exploration.
+
+**What**:
+
+### 6a. Smarter source selection
+- With probability 0.8, pick the bin with the **highest overflow** (greedy). With probability 0.2, pick a random overflowing bin (diversification).
+
+### 6b. Evaluate ALL destination bins for moves
+- For each candidate item from the source, evaluate all `target_bins - 1` destination bins (not sampled). This is typically small (e.g., target < 100).
+
+### 6c. Smarter swap candidate selection
+- For swaps, focus on destination bins that are **under capacity** (have room).
+- From each destination bin, consider items where `w2 < w1` (we want to move weight OUT of the overflowing bin).
+- Sort destination bin items by weight and consider top-k closest to the ideal swap weight.
+
+### 6d. Consider items from non-overflowing bins too (occasionally)
+- Every K iterations, try moving an item from a non-overflowing bin to another non-overflowing bin to create capacity headroom near overflowing bins.
+
+### 6e. Increase candidate counts
+- Source candidates: min(50, len(items_in_source)) instead of 30
+- Swap candidates per dest bin: min(20, len(items_in_dest)) instead of 15
+- Swap target bins: min(8, len(other_bins)) instead of 5
+
+## 7. Adaptive Tabu Tenure
+
+**Why**: Fixed tenure may be too short or too long depending on the search phase.
+
+**What**:
+- Base tenure: `max(7, int(n ** 0.5))`
+- When no improvement for 500 iterations, increase tenure by 20% (up to 2x base)
+- When improvement found, reset tenure to base
+- Random component: `tenure + random.randint(0, tenure // 3)`
+
+## 8. Improved Diversification
+
+**Why**: Current diversification is crude (random moves from overflowing bins).
+
+**What**:
+- **Frequency-based diversification**: Track how many times each item has been moved. When diversifying, preferentially move items that have been moved least frequently.
+- **Perturbation strength**: Start with mild perturbation (move 20% of items from overflowing bins). If diversification triggers repeatedly, increase perturbation strength.
+- After diversification, do a quick greedy improvement pass: for each item in an overflowing bin, try to move it to the bin with most remaining capacity.
+
+## 9. Periodic Tabu Table Cleanup
+
+**Why**: The tabu dict grows unbounded and slows lookups.
+
+**What**: Clean up every 5000 iterations (current 10000 is fine but reduce to match new iteration speed). Use dict comprehension to remove expired entries.
+
+## 10. Implementation Order and Structure
+
+```
+solve(bin_capacity, weights, time_limit):
+  1. Handle edge cases (n=0, n=1)
+  2. Compute FFD initial solution
+  3. Compute L2 lower bound
+  4. If optimal, return
+  5. Main loop: for target from best_num_bins-1 down to lb:
+     a. While time remains for this target:
+        - Pick initialization variant (cycle through options)
+        - Run tabu_search_pack(target, deadline) with improvements above
+        - If success: update best, break to next target
+        - If fail: try next restart
+     b. If all restarts fail: break (can't improve further)
+  6. Return best solution
+```
+
+## 11. Performance-Critical Micro-Optimizations
+
+- Cache `weights[idx]` lookups in local variables
+- Pre-compute weight array as a tuple for faster indexing
+- Use local variable aliases for frequently accessed globals (e.g., `_max = max`)
+- Avoid creating intermediate lists where possible
+- For the tabu lookup, use `.get(key, 0)` which is already done
+
+## Expected Impact
+
+- **L2 bound**: Eliminates wasted time on impossible targets → saves time for achievable targets
+- **Data structure**: 2-5x iteration speed improvement → more iterations per second
+- **Multi-start**: Better coverage of solution space → higher success rate per target
+- **Squared overflow**: Better guidance toward feasibility → faster convergence
+- **Better neighborhood**: Higher quality moves found → fewer iterations needed
+- **Time management**: Using full budget → more search effort overall
+
+Combined, these should significantly reduce the ratio from 1.0147 closer to 1.000.

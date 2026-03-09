@@ -1,0 +1,130 @@
+## Detailed Implementation Plan for Improved VNS Bin Packing
+
+### 1. Compute Lower Bound (L2) at Start
+
+Implement the Martello-Toth L2 lower bound:
+- For a parameter α from 1 to C/2, partition items into three groups:
+  - Large: w > C - α
+  - Medium: C/2 < w ≤ C - α  
+  - Small: α ≤ w ≤ C/2
+- Count bins needed: all large items need their own bin, medium items get their own bin, then small items fill remaining space
+- Take max over all α values and also over the continuous lower bound (ceil(sum_weights / C))
+- Use this to detect optimality: if current solution == L2, stop immediately
+
+### 2. Data Structure Redesign
+
+Replace list-of-lists with an efficient representation:
+- `assignment`: array of length n, where `assignment[i]` = bin index for item i
+- `bin_items`: list of `set` objects (O(1) add/remove)
+- `bin_wts`: list of ints for bin weights
+- `residual`: list of ints for remaining capacity per bin (redundant with bin_wts but avoids subtraction)
+- Helper functions: `move_item(item, from_bin, to_bin)`, `swap_items(item1, bin1, item2, bin2)`
+
+### 3. Improved Initial Solutions
+
+Keep FFD and BFD. Add:
+- **WFD (Worst Fit Decreasing)**: sometimes produces different solutions that VNS can improve
+- **Randomized BFD**: run 3-5 times with slight random perturbation of item order (sort by -weight + small noise)
+- Take the best initial solution among all of these
+
+### 4. Stronger Local Search
+
+The local search is the core of VNS and should be thorough. Implement these operators applied in sequence:
+
+**Phase 1: Target the lightest bin for emptying**
+- Sort bins by weight ascending
+- For the lightest bin, try to redistribute ALL its items to other bins:
+  - For each item in the lightest bin, find the best-fit target bin
+  - If all items can be placed → empty the bin, repeat
+  - If not all items fit with single moves, try Phase 2
+
+**Phase 2: Swap-assisted emptying**
+- For the lightest bin B_light with items that couldn't be moved:
+  - For each stuck item `s` in B_light (weight ws):
+    - For each other bin B_target:
+      - If ws > residual[B_target], check if swapping an item `t` from B_target to B_light (or to any other bin) would create enough room
+      - Specifically: find item t in B_target where wt ≤ ws and (ws - wt) ≤ residual[B_target]
+      - This is a (1,1)-exchange: move s to B_target, move t out of B_target
+      - Item t then needs to go somewhere: check if it fits in any bin (including B_light)
+  - Implement as systematic search over all pairs
+
+**Phase 3: (2,1)-moves**
+- For the lightest bin, try moving 2 items to a target bin while moving 1 item from target to lightest
+- This creates different packing patterns that may allow emptying
+
+**Phase 4: Random swap improvement** (keep existing but make it more systematic)
+- For each pair of bins, try the best improving swap
+- Only do this for a limited number of iterations
+
+**Important**: After each successful bin emptying, restart from Phase 1 with the new lightest bin.
+
+### 5. Revised Shaking Neighbourhoods (k=1..6)
+
+**k=1**: Single random item relocation (move 1 item to a random feasible bin, not necessarily best-fit)
+
+**k=2**: Random (1,1)-swap between two random bins (current k=2)
+
+**k=3**: Take the 2 lightest bins, remove all their items, reinsert using best-fit into remaining bins (may need new bins)
+
+**k=4**: Destroy-and-repair 15-25% of bins (randomly selected), repack extracted items with BFD into remaining bins
+
+**k=5**: Destroy-and-repair 30-50% of bins, repack with BFD
+
+**k=6**: Destroy-and-repair 60-80% of bins, repack with BFD (near-complete restart but keeps some structure)
+
+For k=4,5,6: when selecting which bins to destroy, prefer lighter bins (biased random selection weighted by inverse of bin weight)
+
+### 6. VNS Main Loop Improvements
+
+**Accept criterion**: 
+- Accept strict improvements always (reduce k to 1)
+- Accept equal solutions with probability 0.3 (maintain diversity)
+- Reject worse solutions (increase k)
+
+**Local search intensity**:
+- After shaking, always run the full local search (Phases 1-3)
+- Remove the `max_iter=5` limitation from VNS loop - the local search should run until no improvement
+- The time check inside local search (every few iterations) will prevent hanging
+
+**Early termination**: If solution_cost == L2_lower_bound, return immediately
+
+**Restart strategy**:
+- After `max_no_improve` cycles (e.g., 30), generate a new solution:
+  - Use randomized BFD (sort items by -weight + Uniform(-C/8, C/8) noise)
+  - Apply full local search
+  - If better than best, update best
+  - Reset VNS from this new solution
+
+### 7. Time Management
+
+- Check `time.time()` every ~100 operations in inner loops (not every single operation, to reduce overhead)
+- Reserve last 2% of time for cleanup
+- Use time_limit directly (no 0.95 multiplier initially, switch to 0.98 for final phases)
+- Split time budget: 10% for initial solutions and first local search, 90% for VNS iterations
+
+### 8. Micro-optimizations
+
+- Pre-sort weights array once and cache sorted indices
+- In local search, when scanning for best-fit target, break early if perfect fit found (residual == item weight)
+- Use `bin_items` as sets for O(1) add/remove instead of lists with O(n) `.remove()`
+- Cache `weights[item]` lookups in tight loops using local variables
+- In the swap-assisted emptying, precompute which items fit where to avoid redundant scanning
+- Convert weights list to tuple for faster indexing
+
+### 9. Implementation Order
+
+1. Implement L2 lower bound
+2. Redesign data structures (sets, assignment array, residual array)
+3. Implement improved local search (Phases 1-3)
+4. Update shaking neighbourhoods
+5. Update VNS main loop with new acceptance criterion and time management
+6. Implement restart strategy
+7. Test and tune parameters
+
+### 10. Expected Impact
+
+- L2 bound: eliminates wasted time when optimal is already found (~5-10% of instances)
+- Stronger local search: the swap-assisted emptying should find moves the current implementation misses, reducing extra bins significantly
+- Better data structures: 2-5x speedup in inner loops, allowing more iterations
+- Better shaking: more diverse exploration, helping escape local optima
+- Target: reduce ratio from 1.0202 to ~1.005-1.010

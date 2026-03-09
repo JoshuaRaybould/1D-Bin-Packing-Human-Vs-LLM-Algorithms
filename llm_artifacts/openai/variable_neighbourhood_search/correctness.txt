@@ -1,0 +1,33 @@
+variable_neighbourhood_search_0_initial : CORRECT
+variable_neighbourhood_search_0_post_plan : IMPORT_ERROR: SyntaxError: name 'nonempty_count' is used prior to nonlocal declaration (variable_neighbourhood_search_0_post_plan.py, line 883)
+  File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
+  File "/home/joshua/Documents/fyp/jxr133/llm_artifacts/openai/variable_neighbourhood_search/responses/variable_neighbourhood_search_0_post_plan.py", line 883
+    nonlocal nonempty_count, slack_sq_sum
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+SyntaxError: name 'nonempty_count' is used prior to nonlocal declaration
+variable_neighbourhood_search_0_performance_3 : RUNTIME_ERROR: IndexError: list index out of range
+    undo_relocate(it, ob)
+  File "/home/joshua/Documents/fyp/jxr133/llm_artifacts/openai/variable_neighbourhood_search/responses/variable_neighbourhood_search_0_performance_3.py", line 303, in undo_relocate
+    before_from = bool(bins[b_from])
+                       ~~~~^^^^^^^^
+IndexError: list index out of range
+variable_neighbourhood_search_0_performance_4 : RUNTIME_ERROR: IndexError: list index out of range
+    vnd(bins, loads, assign, pos, max_passes=60)
+  File "/home/joshua/Documents/fyp/jxr133/llm_artifacts/openai/variable_neighbourhood_search/responses/variable_neighbourhood_search_0_performance_4.py", line 400, in vnd
+    if not bins[b_from]:
+           ~~~~^^^^^^^^
+IndexError: list index out of range
+variable_neighbourhood_search_1_initial : CORRECT
+variable_neighbourhood_search_1_post_plan : RUNTIME_ERROR: IndexError: list index out of range
+         ^^^^^^^^^^^^
+  File "/home/joshua/Documents/fyp/jxr133/llm_artifacts/openai/variable_neighbourhood_search/responses/variable_neighbourhood_search_1_post_plan.py", line 387, in construct
+    chosen = top[idx][1]
+             ~~~^^^^^
+IndexError: list index out of range
+variable_neighbourhood_search_1_performance_3 : CORRECT
+variable_neighbourhood_search_1_performance_4 : CORRECT
+variable_neighbourhood_search_2_initial : CORRECT
+variable_neighbourhood_search_2_post_plan : INVALID_ANSWER: weight of instance differs to sum of bin weights
+variable_neighbourhood_search_2_performance_3 : INVALID_ANSWER: weight of instance differs to sum of bin weights
+variable_neighbourhood_search_2_performance_4 : CORRECT
+variable_neighbourhood_search_0_initial : best 1.0181034063284042

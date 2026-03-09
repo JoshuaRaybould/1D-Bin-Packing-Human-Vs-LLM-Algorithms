@@ -1,0 +1,143 @@
+## Detailed Implementation Plan
+
+### 1. Overall Architecture
+
+Replace the current item-centric ACO with a **bin-centric ACO** using the **MAX-MIN Ant System (MMAS)** variant. Use a single pairwise pheromone model for all instance sizes with sparse/efficient storage.
+
+### 2. Data Structures
+
+**Pheromone Matrix (Sparse)**:
+- Use a flat dictionary `tau: dict[tuple[int,int], float]` where keys are `(min(i,j), max(i,j))` for item pairs i,j.
+- Track a set `touched_pairs` of all pairs that have ever received pheromone deposit.
+- Evaporation is applied only to pairs in `touched_pairs`, making it O(|touched|) instead of O(n²).
+- Initialize `tau_init = 1.0 / ffd_num_bins`.
+- For lookups of untouched pairs, return `tau_init * (1-rho)^iteration` (lazy evaporation) OR just return `tau_min` for simplicity.
+
+Actually, for simplicity and correctness, use a different approach:
+- Use a `defaultdict(lambda: tau_init)` for the pheromone.
+- Keep a set of all keys that have been set.
+- During evaporation, only iterate over existing keys.
+- After evaporation, remove keys that have fallen below `tau_min` (they'll default back to `tau_init` which should equal `tau_min` in MMAS at steady state).
+
+**MMAS Bounds**:
+- `tau_max = 1.0 / (rho * best_num_bins)`
+- `tau_min = tau_max / (2 * n)`
+- `tau_init = tau_max` (start with maximum pheromone to encourage exploration initially)
+- Recalculate bounds whenever `best_num_bins` improves.
+
+### 3. Initial Solution
+
+Keep the Best-Fit-Decreasing (BFD) baseline. Also try a few random restarts of BFD with slight weight perturbation to potentially find a better starting solution, spending at most 0.5s on this.
+
+### 4. Bin-Centric Construction
+
+For each ant:
+1. Create a set `remaining` of all item indices.
+2. Sort items by decreasing weight into `sorted_remaining`.
+3. Open a new bin with capacity `C = bin_capacity`.
+4. **Select first item for the bin**: Always pick the heaviest remaining item (deterministic for first item in each bin, ensuring large items are placed first).
+5. **Repeatedly select next item for current bin**:
+   - Build candidate list: all items in `remaining` with `weight[item] <= remaining_capacity_of_bin`.
+   - If no candidates, close bin and go to step 3.
+   - For each candidate item `j`, compute:
+     - `pheromone_score = sum(tau[j][s] for s in items_already_in_bin)` (if bin is empty, use `tau_init`)
+     - `heuristic_score = (weight[j] / remaining_capacity) ^ beta` — this favors items that fill the bin tightly.
+     - `score = pheromone_score^alpha * heuristic_score`
+   - Use roulette wheel selection to pick an item.
+   - Add item to bin, reduce remaining capacity, remove from `remaining`.
+6. Repeat until `remaining` is empty.
+
+**Optimization for speed**:
+- Maintain `sorted_remaining` as a list sorted by decreasing weight. Use binary search to quickly find the cutoff index for items that fit.
+- For bins with many items already placed, limit pheromone sum computation to the last K items added (K=5 or so) to keep it fast.
+- Limit candidate evaluation: if there are too many candidates (>50), subsample or only consider the top-50 by weight.
+
+### 5. Item Ordering Variation
+
+- 70% of ants: Use pure decreasing-weight order for the first item in each bin.
+- 30% of ants: Add Gaussian noise to weights for ordering (as current code does).
+
+### 6. Pheromone Update
+
+**Evaporation** (every iteration):
+```
+for key in list(tau.keys()):
+    tau[key] *= (1 - rho)
+    if tau[key] < tau_min:
+        del tau[key]  # will default to tau_min on next access
+```
+
+**Deposit**:
+- Deposit pheromone only from the **iteration-best** ant and the **global-best** solution.
+- Weight: iteration-best gets deposit `1.0 / iter_best_bins`, global-best gets `1.0 / global_best_bins`.
+- For each bin in the solution, for each pair (i, j) of items in that bin, add deposit to `tau[min(i,j)][max(i,j)]`.
+- Clamp all updated values to `[tau_min, tau_max]`.
+
+**Adaptive weighting**: As iterations progress, gradually increase the weight given to global-best vs iteration-best. Start with equal weights, end with global-best getting 3x the deposit.
+
+### 7. Parameters
+
+- `alpha = 1.0` (pheromone importance)
+- `beta = 2.5` (heuristic importance — slightly higher to favor tight fits)
+- `rho = 0.02` (slower evaporation for better convergence)
+- `num_ants`: Scale with n:
+  - n ≤ 50: 30 ants
+  - n ≤ 200: 20 ants  
+  - n ≤ 500: 15 ants
+  - n > 500: 10 ants
+- But also dynamically adjust: measure time per iteration, and if we're using too little time, increase ants; if too much, decrease.
+
+### 8. Time Management
+
+- Check `time.time()` at the start of each ant construction.
+- Use 95% of the time budget.
+- After first iteration, estimate time per iteration and adjust `num_ants` if needed to ensure we get at least 20 iterations total.
+
+### 9. Pheromone Efficiency for Large Bins
+
+When a bin contains many items (say >10), depositing pheromone for all pairs is O(k²) per bin. For very large bins:
+- Only deposit for pairs involving the top-5 heaviest items in the bin and all other items. This captures the most important structural information while limiting updates.
+
+### 10. Edge Cases
+
+- Items heavier than `bin_capacity`: Skip them (they can't be packed). Actually, they must appear in the output. Place each such item in its own bin (it will overflow, but the problem may not have such items).
+- Single-item bins: No pairs to deposit pheromone for. This is fine.
+- Very small n (≤ 5): Just enumerate or use FFD. Skip ACO.
+
+### 11. Stagnation Detection
+
+- Track the best solution's age (iterations since last improvement).
+- If no improvement for 50 iterations, reinitialize pheromone to `tau_max` (pheromone reset/restart as in MMAS).
+
+### 12. Implementation Outline
+
+```
+def solve(bin_capacity, weights, time_limit):
+    # Setup, edge cases
+    # BFD initial solution
+    # If optimal, return
+    # Initialize MMAS pheromone (sparse dict)
+    # Main loop:
+    #   For each ant:
+    #     Bin-centric construction
+    #     Track iteration best
+    #   Update global best if improved
+    #   Evaporate pheromone
+    #   Deposit from iter-best and global-best
+    #   Clamp to [tau_min, tau_max]
+    #   Check stagnation, restart if needed
+    #   Check time
+    # Return best solution
+```
+
+### 13. Key Differences from Current Code
+
+| Aspect | Current | Improved |
+|--------|---------|----------|
+| Construction | Item-centric (assign each item to a bin) | Bin-centric (fill each bin with items) |
+| Pheromone storage | Full n×n matrix or item-bin matrix | Sparse dictionary, symmetric |
+| Pheromone model for large n | Broken item-bin index model | Same pairwise model for all sizes |
+| Evaporation | O(n²) or O(n × max_bins) | O(|touched pairs|) |
+| Ant system variant | Basic AS | MAX-MIN AS with restarts |
+| Heuristic | 1/(1+remaining) | (weight/remaining)^beta, favoring tight packing |
+| Stagnation handling | None | Pheromone restart after 50 idle iterations |

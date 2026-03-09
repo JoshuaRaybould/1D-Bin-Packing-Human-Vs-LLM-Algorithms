@@ -1,0 +1,171 @@
+Implementation‑ready plan (no code)
+
+1) Change the core representation to enable meaningful crossover
+
+1.1 Use a Random‑Keys chromosome instead of a pure permutation
+- Chromosome: list[float] keys of length n.
+- Phenotype order: sort indices by key ascending; tie by index.
+- Why: crossover on floats (uniform / arithmetic) preserves “relative priorities” smoothly; avoids OX’s disruptive behavior.
+- Still compatible with your existing best‑fit decoder (decode(order)).
+
+1.2 Store only what you must in the population
+- Per individual store: (fitness_tuple, keys, bins_used, optional cached order)
+- Do NOT store packing for every individual (large memory + time). Only reconstruct packing for the current best when updating best.
+- Keep “best_packing/best_bin_weights” as the incumbent; for others store just enough to compare.
+
+2) Make decoding stronger and cheaper
+
+2.1 Upgrade decoder to Best‑Fit Decreasing style but driven by chromosome order
+- Keep your best‑fit placement, but remove jitter from the base decoder; make it deterministic.
+- Add diversification by varying the decoder *policy*, not random tie breaks:
+  - Maintain 2–3 decode variants and choose per evaluation based on a small per‑individual random choice:
+    A) Best‑Fit (tightest remaining)
+    B) First‑Fit on bins sorted by opening time (classic FF)
+    C) Best‑Fit with limited “lookahead bins window” deterministic
+- Fitness uses the best result across these variants for that individual (or choose one variant based on generation). This increases robustness without breaking GA.
+
+2.2 Replace list insert/pop with bucketed structure for remaining capacities
+- Capacity is integer; exploit it.
+- Maintain buckets: array/list of lists for rem in [0..C]. Each bucket holds bin indices with that remaining.
+- To find best fit for weight w, scan rem from w..C to find first nonempty bucket. This is O(C) worst‑case but very fast for typical C (and pure Python operations on lists). If C can be huge, use hybrid:
+  - Buckets up to a threshold (e.g., 50k) else fall back to your bisect list.
+- Update is O(1) push/pop.
+- This can drastically reduce decode overhead, freeing time for more search.
+
+2.3 Add a cheap lower bound and early acceptance in decoder
+- Compute LB = max(ceil(sum/C), max_i ceil(w_i/C) (always 1), and optionally L2 bound: ceil(sum_{i} max(0, 2w_i - C)/C) + …)
+- Use LB in fitness scaling and as an early stop: if current bins opened already exceeds (best_bins_found - 1), you can stop decoding that individual early and return a dominated fitness (k>=best). This saves time in later stages.
+
+3) Improve fitness so it guides “bin reduction” more directly
+
+3.1 Use a fitness that strongly separates solutions with same bin count
+Keep lexicographic but replace slack measures with tighter “waste distribution” signals:
+- Primary: k (bins used)
+- Secondary: total waste = k*C - sum
+- Tertiary: number of bins with waste >= threshold (e.g., >= C/2) (penalize very empty bins)
+- Quaternary: sum(waste^2) (keep)
+This helps the GA prefer packings that are “compressible” into fewer bins.
+
+3.2 Add a mild diversity penalty to prevent premature convergence
+- Track a simple signature per individual: e.g., bins_used + a hash of the top m items’ bin assignments during decode (or order prefix).
+- If duplicates exceed a quota, penalize duplicates slightly in selection only (do not change objective), or enforce uniqueness in population replacement (preferred).
+
+4) Replace crossover and mutation with bin‑packing‑aware operators (still GA)
+
+4.1 Use uniform crossover on random keys
+- Child key[i] = parentA.key[i] with p=0.5 else parentB.key[i].
+- Add a second crossover mode occasionally: arithmetic blend
+  - child = α*A + (1-α)*B with α in [0.3,0.7]
+Uniform preserves building blocks; blend exploits.
+
+4.2 Mutation: targeted key perturbation instead of swaps
+- With probability pm:
+  - Pick t items (geometric: 1,2,4,8 with decreasing probability).
+  - For each chosen item i: key[i] += normalish noise via (random.random()-0.5)*scale; or reassign key[i]=random.random().
+- Increase mutation scale when stagnant.
+This changes relative order locally without fully scrambling.
+
+4.3 Add a bin‑structure preserving recombination (essential for BPP)
+Even with random keys, it helps to explicitly preserve good bins.
+- During evaluation, optionally build a “bin assignment” for top individuals.
+- Implement a “Bin Inheritance Crossover” (BIX) as an alternate operator used, say, 20% of the time:
+  - Take parentA’s best r bins (most filled) as fixed groups.
+  - Remove those items from consideration.
+  - For remaining items, order by parentB’s keys and decode.
+- Output a *child order* or directly a child key vector consistent with inherited groups (simplest: create an order list with inherited bins’ items first, then rest; then convert to keys by assigning increasing ranks + small random jitter).
+This preserves complete high‑quality bins across generations, which OX cannot.
+
+5) Add a memetic improvement step (standard in strong GA for BPP)
+
+5.1 Ruin‑and‑Recreate (R&R) as the local improvement
+This is a canonical memetic component for BPP GAs.
+Apply to a fraction of new offspring (e.g., 20–40%), budgeted by time.
+Procedure for a solution (represented by an order or by its decoded packing):
+- Decode to packing.
+- Select a small set of bins to “ruin”:
+  - Prefer the emptiest bins and/or bins with many small items.
+  - Remove all items from r bins (r chosen from {1,2,3} with bias to 1).
+- Reinsert removed items using a stronger reinsertion heuristic:
+  - Sort removed items by descending weight.
+  - Insert using Best‑Fit into remaining bins; if no fit, open new bin.
+- Acceptance:
+  - Always accept if bins decreased.
+  - If bins equal, accept if secondary fitness improved.
+- Convert improved packing back into chromosome:
+  - Build an order by listing items bin by bin (filled bins first), with items inside bin descending.
+  - Convert to keys by assigning rank positions with tiny random noise.
+This targets exactly the “extra bin” issue: it tries to eliminate low‑fill bins.
+
+5.2 Ejection chain light variant (optional if time)
+If R&R is not enough, add a very small ejection attempt when an item doesn’t fit:
+- Try to move 1 item out of a candidate bin to make space, then place the ejected elsewhere (depth 2).
+Keep it strictly bounded and only during memetic step.
+
+6) Revise the evolutionary loop for better use of 40–100s
+
+6.1 Use a steady‑state / (μ+λ) GA instead of full generational replacement
+- Maintain population size μ.
+- Each iteration create λ offspring (e.g., λ=10), improve/evaluate, then insert and remove worst to keep μ.
+Benefits: faster feedback, easier time control, keeps best always.
+
+6.2 Increase effective evaluations by reducing sort overhead
+- Avoid sorting full population every generation.
+- Maintain population in a list; periodically (every K insertions) partially select elites using nlargest/nsmallest or keep a “best” pointer.
+- Or keep it sorted with bisect insert by fitness (μ ~ 60 so either ok), but do not sort twice per loop as you do now.
+
+6.3 Stagnation control with restarts and adaptive parameters
+- Track iterations since last improvement in best bins.
+- If stagnant for S steps (e.g., 200 offspring):
+  - Increase mutation probability and noise scale.
+  - Inject fresh individuals (5–10%) using diversified constructive heuristics (see §7).
+- If best bins hits LB, stop early (optimal relative to bound) and return.
+
+6.4 Time checks
+- Check time every fixed number of offspring evaluations (e.g., every 25 decodes) not by generation.
+- Also check inside expensive memetic step.
+
+7) Stronger initialization and diversity injection
+
+7.1 Add classic high‑quality heuristic seeds
+Beyond weight-desc/asc permutations:
+- FFD (First‑Fit Decreasing) order
+- BFD (Best‑Fit Decreasing) order (your current decoder with descending order is close)
+- “Pairing” seed: sort by weight desc, then interleave heavy/light: [largest, smallest, 2nd largest, 2nd smallest, …]
+- Multiple random‑keys seeds biased by weight:
+  - key[i] = a*rank_by_weight + (1-a)*random, for a in {0.7,0.85,0.95}
+This yields a spread around good constructive solutions.
+
+7.2 Maintain diversity explicitly
+- Enforce that the population keeps at least D unique signatures (e.g., different bins_used and different order prefix hashes).
+- When inserting a new individual too similar to an existing elite, mutate it more aggressively before evaluation.
+
+8) Output reconstruction (requirement compliance)
+
+8.1 Keep incumbent as full packing
+- Whenever you find a new global best (lexicographically), store its packing and bin_weights.
+- At the end, return those.
+- If you store only keys for others, you can always reconstruct best’s packing by decoding best_order again at the end for safety.
+
+9) Concrete parameter starting points (tunable but implementation-ready)
+
+- μ (population): 80 if n<=300 else 60 if n<=1000 else 40
+- Offspring batch λ: 10
+- Tournament size: 3–4
+- Crossover mix:
+  - 60% uniform random-keys
+  - 20% arithmetic blend
+  - 20% bin-inheritance crossover (BIX)
+- Mutation probability pm: 0.3 base
+  - If stagnant: up to 0.7
+- Memetic R&R applied to:
+  - 30% of offspring normally
+  - 60% when best bins hasn’t improved for a while
+- Ruin bins count r: 1 with p=0.6, 2 with p=0.3, 3 with p=0.1
+
+10) Validation and expected impact
+
+- Speed: bucketed decoder + not storing packings for all individuals should allow significantly more evaluations within 40s.
+- Quality: BIX + R&R directly targets eliminating partially filled bins, the usual cause of being 1–3 bins above LB.
+- Robustness: multiple deterministic decode variants reduces reliance on random jitter and makes fitness more consistent.
+
+Net effect should reduce the average ratio notably (typical improvements in this regime are shaving ~0.5–1.5 bins per instance when already close), and it will scale better as time limit increases to 100s because the steady-state loop naturally keeps searching until cutoff.

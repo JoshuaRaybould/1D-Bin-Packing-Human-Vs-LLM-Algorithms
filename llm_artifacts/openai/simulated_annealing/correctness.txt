@@ -1,0 +1,23 @@
+simulated_annealing_0_initial : TIME: algorithm used too little time of the time budget. Took: 13.276150846941164, Time budget: 40 (for 20 instances). This means when given a time limit, the algorithm terminates much before the time is reached.
+simulated_annealing_0_correctness_1 : CORRECT
+simulated_annealing_0_post_plan : Time limit given to the algorithm was not respected.
+simulated_annealing_0_performance_4 : Time limit given to the algorithm was not respected.
+simulated_annealing_1_initial : TIME: algorithm used too little time of the time budget. Took: 14.045908946034615, Time budget: 40 (for 20 instances). This means when given a time limit, the algorithm terminates much before the time is reached.
+simulated_annealing_1_correctness_1 : CORRECT
+simulated_annealing_1_post_plan : RUNTIME_ERROR: UnboundLocalError: cannot access local variable 'B' where it is not associated with a value
+            ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/joshua/Documents/fyp/jxr133/llm_artifacts/openai/simulated_annealing/responses/simulated_annealing_1_post_plan.py", line 906, in try_ejection_chain
+    old_S, old_L, old_B = S, L, B
+                                ^
+UnboundLocalError: cannot access local variable 'B' where it is not associated with a value
+simulated_annealing_1_performance_4 : CORRECT
+simulated_annealing_2_initial : CORRECT
+simulated_annealing_2_post_plan : RUNTIME_ERROR: IndexError: list index out of range
+    remove_item(i, a, bins, loads, item_bin, pos_in_bin, active_bins, pos_active)
+  File "/home/joshua/Documents/fyp/jxr133/llm_artifacts/openai/simulated_annealing/responses/simulated_annealing_2_post_plan.py", line 167, in remove_item
+    last_it = lst[-1]
+              ~~~^^^^
+IndexError: list index out of range
+simulated_annealing_2_performance_3 : CORRECT
+simulated_annealing_2_performance_4 : CORRECT
+simulated_annealing_2_initial : best 1.0257463879952549

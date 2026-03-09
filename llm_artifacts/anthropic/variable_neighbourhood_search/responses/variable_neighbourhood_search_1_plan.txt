@@ -1,0 +1,125 @@
+## Detailed Implementation Plan
+
+### 1. Lower Bound Computation
+- Compute L1 lower bound: `ceil(sum(weights) / bin_capacity)`
+- Compute L2 lower bound using the Martello-Toth L2 bound: For each threshold α from 1 to capacity//2, count items larger than capacity-α, items in (α, capacity-α], and residual small items. Take the max over all α values. This gives a tighter bound.
+- Use lower bound for early termination: if current best equals lower bound, stop immediately.
+
+### 2. Improved Initial Solution
+- Generate two initial solutions: one with FFD and one with BFD.
+- Keep the one with fewer bins (or better fitness if tied).
+- Apply local search to the initial solution before entering VNS.
+
+### 3. Fitness Function
+- Primary: number of bins (minimize)
+- Secondary (for same bin count): sum of squared bin loads, i.e., `sum((bin_capacity - bin_rem[b])^2 for all b)`. Higher is better because it means items are more consolidated.
+- Implement a comparison function: solution A is better than B if A has fewer bins, or same bins but higher sum of squared loads.
+
+### 4. Enhanced Local Search
+The local search should be a standard component within VNS (VNS requires local search as an essential component).
+
+**Phase 1 - Bin Emptying (current approach, optimized):**
+- Sort bins by ascending load.
+- For each bin (lightest first), attempt to redistribute all its items to other bins using best-fit.
+- If successful, remove the bin. Restart the loop.
+- Add time check every few bin attempts.
+
+**Phase 2 - Transfer Moves:**
+- For each item in each bin, check if moving it to another bin improves sum-of-squares fitness without increasing bin count.
+- Specifically: move item from bin A to bin B if B has space and the resulting sum of squares is higher.
+- Use first-improvement strategy (apply first improving move found, restart).
+- Limit to a bounded number of passes (e.g., 2-3 passes).
+
+**Phase 3 - Swap Moves:**
+- For pairs of bins, try swapping one item from each.
+- Accept if the swap is feasible and improves sum of squares.
+- Use first-improvement, limited passes.
+
+**Phase 4 - Try Bin Emptying Again** (after swaps/transfers may have opened up space).
+
+Add time checks throughout (check every ~100 operations or so).
+
+### 5. Shaking Neighborhoods (k_max = 7)
+
+**k=1: Single random transfer**
+- Pick a random item, move it to a random feasible bin (not the tightest, pick randomly among feasible bins to add diversity).
+
+**k=2: Random swap**
+- Pick two random bins, swap one random item from each if feasible.
+
+**k=3: Chain move**
+- Move 2-4 random items sequentially to random feasible bins.
+
+**k=4: Destroy lightest 1-2 bins, repair with randomized BFD**
+- Empty the 1-2 lightest bins.
+- Repack freed items using randomized best-fit: for each item, choose randomly among the top-3 best-fitting bins (instead of always the absolute best).
+
+**k=5: Destroy 2-4 random bins, repair with randomized BFD**
+- Empty 2-4 randomly selected bins.
+- Repack with randomized best-fit.
+
+**k=6: Destroy 20-30% of bins (lightest ones), repair**
+- Empty the lightest 20-30% of bins.
+- Repack with randomized best-fit.
+
+**k=7: Large random perturbation**
+- Empty 40-50% of randomly chosen bins.
+- Repack freed items in random order using first-fit (not best-fit, for diversity).
+
+### 6. Randomized Repair Procedure
+- For the BFD-based repair: with probability 0.3, pick randomly among bins whose remaining capacity is within 20% of the best-fit bin's remaining capacity, rather than always choosing the absolute best fit. This adds diversity.
+
+### 7. VNS Main Loop
+```
+k = 1
+while time_remaining:
+    if best_cost == lower_bound: break
+    
+    new_bins, new_rem = shaking(bins, bin_rem, k)
+    new_bins, new_rem = local_search(new_bins, new_rem)  # full enhanced local search
+    
+    new_cost = solution_cost(new_bins)
+    new_fitness = sum_of_squares(new_bins, new_rem)
+    
+    if new_cost < current_cost or (new_cost == current_cost and new_fitness > current_fitness):
+        bins, bin_rem = new_bins, new_rem
+        k = 1
+        no_improve_count = 0
+        if new_cost < best_cost:
+            update best solution
+    else:
+        k += 1
+        no_improve_count += 1
+        if k > k_max:
+            k = 1
+    
+    if no_improve_count > k_max * 15:
+        # Restart from best with large perturbation
+        bins, bin_rem = copy(best_bins, best_rem)
+        apply random large perturbation (empty 30-50% of bins, repack randomly)
+        no_improve_count = 0
+        k = 1
+```
+
+### 8. Time Management
+- Use `time_limit * 0.98` as the hard cutoff.
+- Check time at the start of each VNS iteration and inside local search loops (every ~50-100 inner iterations).
+- Since there's no penalty for using more time (up to 100s), use the full budget.
+
+### 9. Performance Optimizations
+- Pre-compute and cache `weights[i]` lookups by creating a local reference.
+- In local search, avoid rebuilding bin lists from scratch; use incremental updates.
+- In bin-emptying attempts, skip bins whose total load exceeds the total remaining capacity of all other bins (quick feasibility check before detailed assignment).
+- When checking if a bin can be emptied, compute `total_available = sum(bin_rem[b] for b != src_b)` first; if it's less than the bin's load, skip immediately.
+
+### 10. Edge Cases
+- Handle n=0, n=1, all items same weight, items equal to bin capacity.
+- If all items exactly fill bins (sum % capacity == 0 and solution matches lower bound), return immediately.
+
+### Summary of Expected Improvements
+- **L2 lower bound**: Enables early termination, saving time for hard instances.
+- **Sum-of-squares fitness**: Allows VNS to make lateral moves that consolidate items, setting up future bin eliminations.
+- **Transfer and swap moves in local search**: These are the biggest missing pieces. The current local search only tries to empty bins directly. Swaps and transfers can restructure bins to make emptying possible.
+- **Randomized repair**: Adds diversity to the search, preventing the algorithm from getting stuck in the same local optima.
+- **More diverse shaking neighborhoods**: Better exploration of the solution space.
+- **Quick feasibility pre-check**: Avoids wasting time on impossible bin-emptying attempts.

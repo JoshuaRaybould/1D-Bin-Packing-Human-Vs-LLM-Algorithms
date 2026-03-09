@@ -1,0 +1,226 @@
+## 1) Reframe the objective to directly reward **bin elimination**
+### 1.1 Primary objective stays: minimize number of bins
+Keep lexicographic comparison with `m` first.
+
+### 1.2 Replace global slack/squared slack with a *bin-elimination focused* secondary
+Your current (slack, slack2) is weakly correlated with actually being able to empty a bin. Use a secondary that pushes towards configurations where one bin becomes “easy to empty”. Standard approach:
+- Track a **target bin** (or small set) to eliminate.
+- Use a secondary that rewards reducing the **residual to be relocated** from that target bin.
+
+Concrete scoring tuple for the current phase:
+- `(m, R, H)` where:
+  - `R = load[target_bin]` (the remaining load inside the bin we want to empty) — smaller is better.
+  - `H` is a tie-breaker like total squared slack (or sum of “wasted” gaps) but computed incrementally.
+
+When `target_bin` becomes empty, you immediately reduce `m`.
+
+Implementation note: You’ll run in “phases” where a target bin is selected; within that phase, most moves are biased to move items *out of* that target bin.
+
+## 2) Maintain **incremental statistics** to avoid recomputation bottlenecks
+Right now `evaluate_*` recomputes `sum(C-lb)` and `sum((C-lb)^2)` inside every candidate evaluation; that’s expensive and limits neighborhood size.
+
+### 2.1 Maintain global aggregates
+Maintain and update after each move:
+- `total_slack = sum(C - load[b])`
+- `total_slack2 = sum((C - load[b])**2)`
+
+Then evaluate deltas in O(1) without scanning all bins.
+
+### 2.2 Maintain fast membership/removal structures
+Your move application uses `bins[src].remove(item)` which is O(k). This is a major hidden cost.
+
+Standard fix:
+- Store bins as `list[int]` plus an `pos_in_bin[item]` index.
+- Remove by swap-with-last:
+  - find position `p = pos_in_bin[item]`
+  - swap with last element, update its pos, pop.
+This makes relocate/swap O(1).
+
+You must keep:
+- `assign[item] -> bin`
+- `pos_in_bin[item] -> position within bins[assign[item]]`
+
+### 2.3 Avoid frequent bin compaction during search
+`remove_empty_bins` renumbers bins and forces O(n) assignment fixes, which is disruptive and costly.
+Instead:
+- Keep bins in-place; mark empty bins in a free-list.
+- When a bin becomes empty, push its index to `empty_bins` and keep it as `[]` with load 0.
+- Maintain `active_bins` list (indices with non-empty bins) for sampling.
+Only compact/renumber once at the end when returning the best solution.
+
+This also avoids invalidating stored bin indices in candidate moves.
+
+## 3) Upgrade the neighborhood to **structured, bin-packing standard moves**
+Random relocate/swap is too weak to empty bins. Add the following neighborhoods, still under tabu search.
+
+### 3.1 Core move types
+Implement these move generators (feasible-only):
+1) **Relocate (1-move)**: move one item i from bin A to bin B.
+2) **Swap (1-1)**: swap items between bins.
+3) **2-0 move (pair relocate)**: move two items (i,j) from a source bin into one (or two) destination bins.
+   - Key for emptying bins when single items don’t fit.
+4) **2-1 / 1-2 swap variants** (optional if time): swap one large item with two smaller ones across two bins.
+
+You don’t need all variants everywhere; use them primarily when trying to eliminate a bin.
+
+### 3.2 Targeted “empty this bin” neighborhood (most important)
+When a target bin `t` is selected:
+- Prefer moves that remove items from `t`.
+- For each candidate item `i` in `t` (try top-k by weight):
+  - try best destination bins by **best-fit** (min remaining capacity after placement) among a sampled set.
+- If no single relocate works, attempt **pair moves** out of `t`:
+  - pick two items `i,j` from `t` (biased to large+medium) and try to place them into two best-fit bins (could be same bin if fits).
+
+This is standard “bin-oriented” intensification in bin packing tabu.
+
+### 3.3 Ejection chain lite (bounded depth 2–3)
+Full ejection chains can be complex, but a bounded version is implementation-feasible and very effective.
+
+Procedure (depth 2 or 3, used only when target bin items don’t fit):
+- Try to move `i` from `t` into some bin `b` that is almost feasible (over by a small amount).
+- Eject one item `e` from `b` (choose smallest item that makes it feasible), and relocate `e` elsewhere.
+- Optionally one more level.
+
+Acceptance: treat the whole chain as one compound move; tabu-mark involved (item,bin) attributes.
+
+This is still tabu search (compound neighborhood) and directly addresses “hard-to-place” items.
+
+## 4) Make move selection smarter: **candidate lists + best-improving within sampled set**
+### 4.1 Replace purely random destination selection
+For relocate of item `i`, sample candidate destination bins based on remaining capacity:
+- Let `need = w[i]`.
+- Prefer bins with `rem` in `[need, need + delta]` (tight fit), else consider largest-load bins.
+
+Implementation approach without heavy data structures:
+- Maintain `active_bins`.
+- Sample, say, 30 bins uniformly and pick the best-fit among those.
+- Additionally, always consider the top few most loaded bins (good for tight packing).
+
+### 4.2 Explicitly increase neighborhood size now that eval is cheap
+Once O(1) evaluation is in place, increase:
+- relocate candidates to ~`20*n` (capped, e.g. 5000)
+- swap candidates to ~`10*n` (capped)
+But keep it adaptive to time: see §8.
+
+### 4.3 Use “best admissible” selection with aspiration
+Keep aspiration, but enhance it:
+- Aspiration if it improves **best bin count**, not just full tuple.
+- Also allow tabu override if it reduces `R` (target bin remaining load) by a large margin.
+
+## 5) Improve tabu memory: attributes, tenure, and cleanup
+### 5.1 Use attribute-based tabu that prevents immediate reversal
+Current tabu `(item, dst)` is okay but incomplete.
+Add also:
+- `(item, src)` to prevent moving the same item straight back.
+For relocate i: mark tabu on returning to previous bin for tenure.
+
+For swap: mark both items’ previous bins.
+
+### 5.2 Tenure should be adaptive
+Standard practice:
+- Tenure increases when stagnating; decreases when improving.
+Concrete:
+- Maintain `tenure = base + rand(span)` but scale `base` with `sqrt(m)` or `log(n)`.
+- Every time no improvement for X iterations, increase `base_tenure` up to a cap.
+- When improvement, slowly decrease towards default.
+
+### 5.3 Periodically purge expired tabu entries
+Your dict grows. Every e.g. 2048 iterations:
+- iterate over keys and delete expired.
+This keeps overhead bounded.
+
+## 6) Intensification/diversification that is **bin-packing-aware**
+Random kicks are too destructive.
+
+### 6.1 Intensification: focus on a target bin until success or timeout
+Phase logic:
+1) Choose `target_bin` among the **lightest** bins (or bins with smallest load but non-empty), because those are easiest to eliminate.
+2) Run tabu moves biased to empty it for `phase_iters` (e.g., 200–2000 depending on n).
+3) If eliminated: reselect new target.
+4) If stuck: switch target bin or diversify.
+
+### 6.2 Diversification: frequency-based penalties (standard tabu component)
+Maintain `move_freq[item][bin]` approximately (don’t store full matrix; store dict counts for visited pairs).
+In evaluation, add a small penalty term for frequently used assignments:
+- `penalty = lambda * freq(item,dst)`
+This encourages exploring new placements without random destruction.
+
+If memory must be small:
+- track only per-item move count and per-bin visit count.
+
+### 6.3 Diversification move: “large item reshuffle” rather than random
+When stagnating:
+- pick 1–3 of the largest items currently in over-slack bins and force moves into tight bins (or temporarily open a new bin by moving them) to change structure.
+- Or select 2 bins with highest slack and try a few best-fit relocations between them.
+
+## 7) Add a **repair-based step** that is still within tabu search: attempt actual bin removal
+When you find a configuration with a very light bin `b`:
+- Attempt deterministic elimination trial:
+  - remove all items from `b` (conceptually) and reinsert them one by one using best-fit into other bins, allowing limited ejections (depth 1).
+If successful, you have a strictly better solution (m-1). If not, revert.
+
+This is essentially a large neighborhood “bin elimination” move; it can be treated as a compound tabu move (still tabu search) and is extremely effective for shaving the last few extra bins.
+
+Keep it rare (e.g. every time `R` below a threshold, or every K iterations).
+
+## 8) Time-budget usage: adaptive iteration and check cadence
+You are allowed up to 100 seconds; current feedback shows you always hit the 40s budget. Improve “solution per second” first, then scale.
+
+Implementation plan:
+- Use a large `max_iters` (e.g. 5e6) but rely on time checks.
+- Time check every fixed number of iterations (e.g. 256) but also if inside expensive compound moves.
+- Adapt neighborhood sampling counts by elapsed time and n:
+  - early: larger neighborhoods to quickly improve packing quality
+  - late: more bin-elimination intensification and ejection trials
+
+## 9) Improve the initial solution (still compatible with tabu search)
+Better start often yields fewer bins.
+
+### 9.1 Multi-start BFD/FFD variants within small startup budget
+Within the first ~1–3% of time_limit:
+- Generate several initial solutions:
+  - BFD as you have
+  - FFD
+  - BFD with randomized tie-breaking / slight random perturbation of order (e.g., shuffle within equal weights)
+Pick the best as the starting incumbent.
+
+This is not changing algorithm family; it’s common in tabu implementations.
+
+## 10) Correctness/robustness improvements (important when adding complex moves)
+- Keep invariants: `sum(loads) == sum(weights)` and each item assigned exactly once.
+- After each compound move, update `assign`, `pos_in_bin`, `loads`, `total_slack`, `total_slack2` consistently.
+- Only compact bins at the very end when returning best.
+
+## 11) Concrete implementation steps (order of work)
+1) **Data structure refactor**: introduce `pos_in_bin`, O(1) remove, stop renumbering during search, maintain `active_bins` and `empty_bins`.
+2) **Incremental scoring**: maintain `total_slack`, `total_slack2`; rewrite evaluate functions to avoid any `sum(...)` over bins.
+3) **Phase-based target bin** selection + new scoring tuple `(m, R, total_slack2)` (or similar).
+4) **Neighborhood rewrite**:
+   - relocate: primarily from `target_bin` plus a small fraction global
+   - swap: between target and others
+   - add pair-relocate out of target
+5) **Ejection chain lite** (depth 2) for items from target bin.
+6) **Tabu memory upgrade**: tabu on returning to previous bin; adaptive tenure; periodic cleanup.
+7) **Diversification**: frequency penalty + structured perturbations.
+8) **Bin elimination trial** as an occasional large neighborhood move.
+9) **Multi-start initialization**.
+10) Tune constants: phase length, candidate sizes, ejection depth, tenure bounds.
+
+## 12) Tuning targets (practical defaults)
+- Phase length: `phase_iters = 500 + 20*n` capped at maybe 5000.
+- Candidate counts per iter after refactor:
+  - reloc tries: 200–1000 (independent of n once O(1))
+  - swap tries: 100–500
+  - pair-relocate attempts: 20–100 when target_bin not decreasing
+- Ejection chain: only for top 2–4 largest items in target bin.
+- Tenure: base 5–15, adaptive up to 30–60 when stuck.
+- Frequency penalty coefficient: small, e.g. equivalent to +1 in tertiary term.
+
+## 13) Expected impact
+These changes specifically increase the rate of successful bin removals by:
+- making the search goal-directed (empty one bin)
+- enabling multi-step relocations via pair moves/ejection chains
+- allowing far more candidate evaluations per second
+- reducing cycling and improving exploration via adaptive tabu and frequency penalties
+
+Given your current 1.0286 ratio, these upgrades are the standard toolbox to shave the remaining 2–3% gap, especially on instances where a few difficult items prevent simple relocations from emptying a bin.

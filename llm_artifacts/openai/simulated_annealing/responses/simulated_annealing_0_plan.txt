@@ -1,0 +1,199 @@
+## 1) Change the SA objective handling to be *lexicographic* (bins first)
+### 1.1 Track objective as a tuple, not a single weighted float
+- Maintain:
+  - `B = number of non-empty bins`
+  - `S = a secondary metric used only to compare states with the same B`
+- Use comparisons `(B, S)` for best-solution updates.
+- For SA acceptance, compute an energy `E` that makes *any* increase in B far larger than any change in S, but avoid huge constants that make `exp(-dE/T)` underflow.
+
+### 1.2 Define a better secondary metric aligned with bin elimination
+Replace `total_slack`/`max_slack` with something that rewards *fillable* bins and penalizes fragmentation:
+- Let slack of bin j be `s_j = C - load_j`.
+- Use:
+  - `S = sum(phi(s_j) for non-empty bins)`
+  - where `phi(s)` is convex increasing to penalize large slack strongly, e.g. `phi(s)=s*s` or `phi(s)=s^1.5` (integer-friendly: `s*s`).
+Rationale: minimizing sum of squared slacks tends to create tighter bins and leaves fewer “hard-to-fill” gaps.
+
+### 1.3 SA energy function with stable scaling
+- Define `E = B * K + S`, with K chosen so that `K > max possible change in S`.
+- Upper bound for S change in one move is at most about `C^2` scale; across bins it’s larger, but for acceptance you only need K to dominate typical deltas.
+- Practical choice: `K = (C*C) * 4` (or `8`) to ensure one extra bin is much worse than any S improvement from one move.
+- Keep values as integers where possible for speed.
+
+## 2) Redesign neighborhoods to directly create empty bins (still SA)
+The neighborhood is the engine of SA. Add bin-packing-standard move types that explicitly attempt to eliminate a bin.
+
+### 2.1 Keep current move/swap, but make them O(1)
+(Details in section 4.) These remain as “mixing” moves.
+
+### 2.2 Add a **bin-emptying (destroy/repair) move** as an SA move type
+This is still a single SA step: propose a new state by trying to empty one bin.
+- Choose a source bin `b_src` with probability biased toward:
+  - smallest load (easier to empty), or
+  - largest slack (most wasteful), or
+  - random among the worst 20% by slack.
+- Attempt to relocate *all* items of `b_src` into other bins.
+
+**Repair strategy (feasibility-first):**
+- Process items in `b_src` in descending weight.
+- For each item, choose a destination among bins with enough remaining capacity using a best-fit rule.
+- If all items can be placed, the move empties `b_src` and reduces B by 1 (huge win).
+- If not all can be placed, either:
+  - abort and revert immediately (counts as rejected proposal), or
+  - allow a limited number (1–2) of “ejection chains”: move one blocking item out of a destination bin to another bin to make space.
+
+Implementation note: This is a *compound move*, but it is standard in SA to define a move as any neighbor generation procedure. You still accept/reject once per attempt.
+
+### 2.3 Add a **2-for-1 merge move**
+Try to merge two low-load bins into one and redistribute leftovers:
+- Pick two bins `a,b` (biased to small loads).
+- If `load[a] + load[b] <= C`, merge directly (always good).
+- Else attempt partial merge: move a subset of items from `a` into `b` (or vice versa) to empty one of them, using the same best-fit repair idea.
+
+### 2.4 Add a **capacity-guided “target slack” move**
+Current “move” samples target bins and chooses tightest residual. Improve this by targeting bins whose slack matches the item weight to avoid creating unusable gaps:
+- Maintain bins grouped by current slack (or remaining capacity).
+- For item weight `w`, prefer bins with slack close to `w` (tight fit), but with some randomness.
+This increases chances of consolidating items.
+
+### 2.5 Adaptive move-type probabilities
+Use acceptance feedback to adjust probabilities every fixed window (e.g. every 20k iterations):
+- Track how often each move type produces an accepted move and how often it reduces B.
+- Increase probability of move types that actually reduce B or improve S at current temperature.
+This is a standard SA tuning mechanism.
+
+## 3) Use a multi-phase SA schedule geared to bin minimization
+### 3.1 Two-level temperature: within-bin vs bin-count transitions
+- Phase A (hot, short): explore S aggressively while keeping B stable; goal is to reach a “packable” configuration where a bin-emptying attempt succeeds.
+- Phase B (targeted): repeatedly attempt bin-emptying / merge moves; accept occasional S-worsening moves to enable future bin elimination.
+- Alternate A/B or trigger B when stall detected.
+
+### 3.2 Temperature initialization based on measured deltas for *S only*
+Current T0 uses mixed deltas that include nonempty changes; that can distort T.
+- Estimate average positive delta in `E` **for moves that keep B unchanged**.
+- Set `T0` so that acceptance probability for those deltas is ~0.6–0.8.
+
+### 3.3 Cooling schedule with reheats tied to B-stalls
+- Maintain `stall_B` = iterations since last improvement in B.
+- If `stall_B` exceeds threshold, reheat moderately (e.g. `T = max(T, 0.5*T0)`) and increase probability of bin-emptying moves.
+- Keep a slow geometric cooling overall, but allow these reheats.
+
+## 4) Major speedups: make each SA iteration cheaper
+The goal is more iterations in the same 40s, which usually yields better best-found B.
+
+### 4.1 Represent bin membership with O(1) removal
+Current code does `bl_from.index(item)` which is O(bin size).
+- Maintain:
+  - `bins: list[list[int]]` as now
+  - `pos[item] = index within bins[assign[item]]`
+- Removal becomes swap-with-last in O(1) without searching:
+  - idx = pos[item]
+  - last = bins[b][-1]
+  - bins[b][idx]=last; pos[last]=idx; pop
+- Update `pos[item]` when inserting to new bin.
+This change alone can multiply iteration throughput.
+
+### 4.2 Maintain `nonempty` and `S` incrementally *exactly*
+Stop the approximate `max_slack` machinery and random full recomputes.
+- Since max_slack is no longer used, you only need to update:
+  - `B` via load hitting 0 or leaving 0
+  - `S = sum(slack^2)` over non-empty bins
+- For a move affecting bins p and q:
+  - compute old slack, new slack; update S by subtracting old contributions and adding new contributions (careful when a bin becomes empty/non-empty).
+This yields exact deltas, stable acceptance, and fewer expensive full scans.
+
+### 4.3 Reduce copying of full solutions
+Copying `best_bins = [b[:] for b in bins]` is expensive.
+- Store best solution as `best_assign` only (and `best_B`, `best_S`).
+- Rebuild bins at the end from `best_assign`.
+- If you need loads for final output, compute them during rebuild.
+This makes “best update” cheap.
+
+### 4.4 Avoid per-iteration allocations
+- Avoid creating lists like `cand = random.sample(range(nbins), k=k)` frequently.
+  - Use a loop that draws `k` random bins with `randrange` (allow duplicates) or precompute a small buffer.
+- Avoid creating `targets = list(range(nbins))` and shuffling.
+
+## 5) Improve the initial solution quality (still offline heuristic, before SA)
+A better start reduces the gap SA must close.
+
+### 5.1 Generate multiple diverse initial packings, pick best (by B then S)
+Within a small fraction of time (or a fixed small iteration budget at start):
+- Build, say, 8–20 initial solutions using variants:
+  - Best-Fit Decreasing with randomized tie-breaking (current)
+  - First-Fit Decreasing with randomized order among equal weights
+  - Best-Fit with a small random noise on residual to diversify
+- Keep the best as SA start.
+This is not a separate metaheuristic; it’s common SA practice to start from a strong state.
+
+### 5.2 Add a fast deterministic lower bound for guidance (optional but useful)
+Compute LB = max(ceil(sum_w/C), max over k of ceil(sum of k largest / C)?). Keep it simple:
+- At least `ceil(total_weight/C)`.
+Use LB only for reporting/early focusing (e.g. if B==LB, intensify S or stop).
+
+## 6) Add an SA-consistent feasibility-preserving “bin compaction” operator
+This is not a separate local search; it is a neighborhood move used occasionally.
+- Pick a few bins with high slack.
+- Reinsert their items one by one into the rest using best-fit (like a small destroy/repair), possibly leaving them emptier.
+- Accept/reject as a single SA move.
+This often discovers bin eliminations missed by single-item moves.
+
+## 7) Iteration/time-budget structure (meets hard requirements)
+### 7.1 Fixed iteration cap + periodic time checks
+- Keep a large `max_iters`.
+- Check time every `check_every` iterations (tune for overhead; after speedups, can increase to e.g. 2000–10000).
+- If time exceeded, immediately rebuild from `best_assign` and return.
+
+### 7.2 Deterministic “use all time” behavior
+- Because runtime can extend to 100 seconds, set `max_iters` high enough that time, not iterations, is the stopping factor.
+
+## 8) Concrete move set (implementation-ready)
+Define move types and when to use them:
+1) `single_move` (weight ~40–55%)
+   - move one item to another bin using slack-targeted selection.
+2) `swap_move` (weight ~15–25%)
+   - swap two items between bins (use O(1) remove/insert).
+3) `empty_bin_move` (weight ~15–30%, increased when stalled)
+   - choose bin, attempt full relocation with limited ejection.
+4) `merge_bins_move` (weight ~5–15%)
+   - attempt direct merge or partial merge.
+5) `compact_destroy_repair` (weight ~2–8%, rare)
+   - pick 2–4 bins, remove all items, reinsert.
+
+Weights adapt based on success rates.
+
+## 9) Acceptance rule details
+- Compute `dE = (B2*K + S2) - (B*K + S)`.
+- Accept if `dE <= 0` else with probability `exp(-dE/T)`.
+- Use separate temperature scaling for bin-count changes if needed:
+  - Option A (simple): same T for all.
+  - Option B: if `B2 > B`, multiply dE by a factor (or effectively lower T) to discourage adding bins.
+Given we never create new bins during SA (see below), `B2 > B` is rare anyway.
+
+## 10) Allow dynamic bin set size (important)
+Currently nbins is fixed and bins are never deleted during SA. That constrains search.
+- Change representation so that:
+  - You *can* empty a bin and then keep it as an available empty bin, but **do not let SA create new bins beyond the initial count**.
+  - This keeps feasibility and prevents worsening B by opening new bins.
+- Maintain a list/set of empty bins for targets.
+- B is simply the number of bins with load>0.
+This is consistent with SA and aligns with objective.
+
+## 11) Validation and tuning checklist
+- Verify invariants after moves occasionally (debug mode only):
+  - item appears in exactly one bin
+  - loads match sums
+  - no bin exceeds capacity
+- Tune parameters on a small benchmark:
+  - `phi(s)=s*s`
+  - initial T0 from sampled S-deltas
+  - `alpha` around 0.9995–0.9998 depending on achieved iterations/sec
+  - stall thresholds for reheats
+  - limits for ejection chain depth (start with 1)
+
+## Expected impact
+- Speed: removing `list.index` and eliminating full copies on improvements typically yields a large iteration/sec gain.
+- Quality: bin-emptying and merge moves directly target the primary objective (reducing B), which is what your metric shows is still leaving 311 extra bins total over LB.
+- Stability: exact incremental S updates reduce noise and improve acceptance behavior.
+
+This plan keeps simulated annealing as the primary method, but makes it “bin-packing aware” by using neighborhoods and scoring that are standard for SA on packing problems.

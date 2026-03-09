@@ -1,0 +1,14 @@
+genetic_algorithm_0_initial : CORRECT
+genetic_algorithm_0_post_plan : CORRECT
+genetic_algorithm_0_performance_3 : CORRECT
+genetic_algorithm_0_performance_4 : INVALID_ANSWER: bin capacity exceeded
+genetic_algorithm_1_initial : CORRECT
+genetic_algorithm_1_post_plan : CORRECT
+genetic_algorithm_1_performance_3 : CORRECT
+genetic_algorithm_1_performance_4 : CORRECT
+genetic_algorithm_2_initial : Time limit given to the algorithm was not respected.
+genetic_algorithm_2_correctness_1 : RUNTIME_ERROR_UNDER_TIME_LIMIT(0.1): TimeoutError: 
+genetic_algorithm_2_correctness_2 : CORRECT
+genetic_algorithm_2_post_plan : INVALID_ANSWER: weight of instance differs to sum of bin weights
+genetic_algorithm_1_performance_3 : best 1.0252218577268883
+

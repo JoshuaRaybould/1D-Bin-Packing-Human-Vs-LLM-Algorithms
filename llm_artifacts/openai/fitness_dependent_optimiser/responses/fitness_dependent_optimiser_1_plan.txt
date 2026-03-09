@@ -1,0 +1,178 @@
+## 1) Strengthen lower bounds (better target, better early termination)
+### 1.1 Keep current trivial LB, add two classic offline 1D bounds
+Compute these once:
+- **L0**: ceil(sum(w)/C) (already).
+- **L1 (max item bound)**: at least count of items with w_i > C/2 (each must start its own bin unless paired with very small items; still gives a valid bound when formulated properly):
+  - Let H = {i | w_i > C/2}. Then LB ≥ |H| and also ≥ ceil((sum(w) - sum of smallest |H| items that can pair)/C) is messy; keep the safe |H| as an auxiliary.
+- **L2 (Martello–Toth / L2 simple form)**: for k in {C//2+1 .. C} group “large” items. Practical simplified version:
+  - Sort weights descending.
+  - For thresholds t in {C//2, C//3, C//4} compute: count items > t plus a residual capacity argument:
+    - Example safe bound: LB_t = count(w>t) + ceil(max(0, sum(w<=t) - count(w>t)*(C - (t+1)))/C). Use only if proven safe; if unsure, skip.
+Given risk of incorrect bounds, prefer **well-known safe bound**: **dual-feasible function bound (DFF)** with 1–2 simple DFFs:
+- DFF1: f(x)=1 if x> C/2 else x/(C/2) rounded up in integer terms is not safe. Avoid complex.
+
+Implementation-ready safe approach:
+- Compute **LB = max(L0, max_w_bound, two-item bound)**:
+  - max_w_bound = ceil(max(w)/C) (usually 1) not useful.
+  - **Pairing bound** (safe): Let A be items in (C/2, C]. They each occupy a bin; remove them and reduce capacity for remaining sum: LB = max(L0, |A| + ceil((sum(remaining))/C)). This is safe.
+
+### 1.2 Use LB as “hard” early exit and also as fitness reference
+- Early return if bins == LB.
+- Track “best possible” improvements; if best == LB, stop immediately.
+
+## 2) Replace Best-Fit decoding with a stronger decoder (still decoder, not a new metaheuristic)
+Current `best_fit_from_order` is O(n·#bins) and misses structure. Upgrade to **Best-Fit-Decreasing with candidate order controlled by priority**, plus a lightweight **bin-opening policy**.
+
+### 2.1 Use a bin residual data structure to speed selection
+Maintain bins keyed by residual capacity.
+- Use `bisect` over a sorted list of residuals (standard library) to find the **tightest residual >= weight**.
+- Data structures:
+  - `residuals`: sorted list of residual capacities.
+  - `bins_for_residual`: mapping residual -> list of bin indices (handle duplicates).
+  - Or maintain parallel arrays and an order-stat-like structure; simplest: keep list of (residual, bin_index) sorted and update with `bisect.insort` (O(#bins) shift). For n up to a few hundred, acceptable; for larger, use residual buckets (0..C) if C is not huge; if C can be large, use sorted list.
+Goal: more evaluations per second.
+
+### 2.2 Use **FFD/BFD hybrid** controlled by priority
+Instead of mapping priority directly to full permutation, split into two components per item:
+- `key1`: priority (search-controlled)
+- `key2`: weight (deterministic)
+Then build order by sorting on (key1, weight) but also **apply a deterministic “heavy-first windowing”**:
+- Partition items into weight classes (e.g., >2/3C, (1/2C,2/3C], (1/3C,1/2C], <=1/3C).
+- Decode in class order heavy→light, but within each class use priority order.
+This preserves the benefit of decreasing-like ordering while still letting FDO affect the relative order where it matters.
+
+### 2.3 Add an *in-decoder repair pass* (standard in packing decoders)
+After initial placement, run 1–2 cheap deterministic repairs **as part of decoding**:
+- **Fill improvement**: iterate bins sorted by residual ascending; try to move one item from a “slack” bin into a tighter bin if it fits, choosing best residual reduction. Limit attempts to a small budget (e.g., 2n move checks via random sampling of items/bins based on priorities).
+- **Single-bin emptying attempt**: choose 1–2 lightest bins; try to reinsert their items into other bins using best-fit; if all items placed, eliminate that bin.
+These are not a separate local search loop; they are a standard decoder “repair” to improve feasibility/packing quality from a permutation.
+
+### 2.4 Cache decode results for identical permutations (micro-optimization)
+Because continuous priorities often produce same ordering, add a small LRU-like cache:
+- Hash ordering into a tuple of a few ranks or full tuple for n<=200.
+- Cache `bins_used` and maybe `bin_weights`.
+Keep cache small (e.g., 200–500 entries) to avoid overhead.
+
+## 3) Make fitness more informative (reduce plateaus)
+Current fitness: `bins + tiny unused term` is too flat; many solutions share the same bins.
+
+### 3.1 Lexicographic objective implemented as a scalar
+Primary: minimize bins.
+Secondary: maximize load balance / minimize waste in a way that correlates with future bin removal.
+Implementation-ready scalar:
+- `bins = len(bin_w)`
+- `waste = sum(C-bw)`
+- `max_res = max(C-bw)`
+- `topk_res = sum(sorted(C-bw, reverse=True)[:min(5,bins)])` (focus on worst bins)
+Fitness:
+- `f = bins + (topk_res / (C*min(5,bins))) * 1e-2 + (waste/(C*bins))*1e-3`
+Rationale: within same bin count, prefer packings with fewer very-empty bins; those are more likely to be eliminable.
+
+### 3.2 Add a strong penalty when any bin is “too empty”
+Soft penalty term:
+- Let `empties = count(residual > C/3)`
+- Add `empties * 1e-3` (scaled below 1 bin).
+
+## 4) Upgrade FDO search dynamics to better explore permutations
+The current continuous step `food[d]-xi[d]` with noise changes priorities but often does not change rank order enough to change packing.
+
+### 4.1 Switch to **rank-based perturbation** while staying in FDO
+Keep priority vectors, but update them in a way that targets rank changes:
+- After computing `newx`, apply a **rank-jitter operator**:
+  - Choose `m` indices (m depends on fw and n).
+  - For each chosen item i, set `newx[i] = clip01(newx[i] + N(0, sigma))` approximated via `(random.random()-random.random())*sigma`.
+  - Additionally, with small probability, **swap** priority values of two random indices (this is still operating on the priority vector, not introducing a new algorithm).
+This increases permutation diversity per evaluation.
+
+### 4.2 Adaptive dimension selection and step size using progress signals
+Maintain per-iteration:
+- `stall_iters`: iterations since last improvement in best bins.
+Adapt:
+- If stalled > S (e.g., 150 iterations), increase:
+  - noise_scale
+  - number of perturbed dimensions k
+  - probability of swap-mutation
+- If improvements are happening, decrease noise to intensify.
+
+### 4.3 Population structure: elites + explorers
+Each iteration:
+- Keep top `E` individuals unchanged (elitism, E=2–4).
+- Update others with FDO.
+- Every `T` iterations, **reinitialize** the worst `R` individuals (R=10–20% pop) using a biased initializer (see 5.2).
+This is standard population management, still within FDO.
+
+### 4.4 Use multiple “foods” (leaders)
+Instead of only global best, also select:
+- `food1 = global best`
+- `food2 = random from top 20%`
+For each individual choose food based on fw (worse individuals follow global best more; mid ones follow food2). Prevents premature convergence.
+
+## 5) Better initialization and diversification (more good structure early)
+### 5.1 Seed with strong deterministic orders
+Add several initial individuals that correspond to known good permutations:
+- Pure FFD: priority = weight (descending)
+- BFD-like: same but small random jitter
+- “Complement pairing”: sort by |w - C/2| descending (puts near-half items early)
+- Random permutations (rest)
+Convert each order to priority values by assigning descending ranks into [0,1).
+
+### 5.2 Biased random priorities toward weight
+For random individuals, generate:
+- `priority[i] = beta*rand + (1-beta)*(w[i]/C)` with beta in [0.5..0.8]
+This keeps structure while allowing variety.
+
+### 5.3 Scheduled “kick” diversification
+Every fixed iteration block (e.g., 250):
+- Apply strong mutation to a subset: reset 30–50% of dimensions for worst individuals.
+- Or rebuild them from a new biased scheme.
+Ensure time checks inside.
+
+## 6) Increase evaluations per second (so time budget buys more search)
+### 6.1 Faster decode
+Implement bisect-based best-fit on residuals, reducing inner loops.
+
+### 6.2 Reduce Python overhead in sorting
+- Pre-store `w` locally, and for decoding order, avoid lambda inside hot loops when possible:
+  - Use `sorted(range(n), key=keyfunc, reverse=True)` where keyfunc closes over `priority` and `w`.
+  - For large n, reduce sorting frequency by **partial ranking**:
+    - Only recompute full order when a sufficient number of dimensions changed; else reuse previous order with local adjustments is complex—skip unless necessary.
+
+### 6.3 Evaluation scheduling
+- Current time check every 5 evals; keep but also check inside expensive decode-repair loops.
+
+## 7) Iteration budget and time management (use up to 100s safely)
+Hard requirement: fixed number of iterations + periodic time checks.
+- Set `max_iters` higher (e.g., 8000–20000 depending on n) and rely on time limit to stop.
+- Use dynamic inner work based on remaining time:
+  - If remaining_time is large, include repair pass; if near deadline, skip repair to squeeze last evaluations.
+This is still one algorithm; it just adjusts decoder effort.
+
+## 8) Validation of packing and stable output
+- Always maintain `best_pack, best_bw` from the decoder output.
+- Ensure bin_weights align with packing.
+- Make sure any repair/move updates both lists consistently.
+
+## 9) Concrete implementation steps (order of work)
+1. Add improved LB: `LB = max(ceil(sum/C), count(w>C/2) + ceil(sum(w<=C/2)/C))`.
+2. Implement new decoder:
+   - Build order via weight classes + priority within class.
+   - Pack via best-fit using residual structure.
+   - Run 1 pass “empty a small bin” (try 1–2 candidate bins).
+3. Replace fitness with top-k residual emphasis.
+4. Modify FDO loop:
+   - Add elites.
+   - Two-leader foods.
+   - Adaptive noise/k based on stall.
+   - Add swap/jitter mutation.
+   - Periodic reinit of worst.
+5. Improve initialization with 4–6 structured seeds + biased randoms.
+6. Adjust iteration counts upward and add remaining-time conditioned decoder repair.
+7. Add small permutation cache for n<=200.
+
+## 10) Expected impact
+- Stronger decoder + repair should directly reduce extra bins (especially by eliminating 1–2 nearly empty bins that current BF leaves).
+- Fitness shaping will guide improvements within same bin count toward configurations more likely to drop a bin.
+- Rank-jitter + swap mutation will create more meaningful permutation changes per evaluation, increasing the probability of finding bin-reducing packings.
+- Faster best-fit selection increases evaluations per second, converting the full 40–100s into more search steps.
+
+All changes keep FDO as the primary search method; improvements are in representation/decoder/fitness and standard population/perturbation mechanics within the same metaheuristic.

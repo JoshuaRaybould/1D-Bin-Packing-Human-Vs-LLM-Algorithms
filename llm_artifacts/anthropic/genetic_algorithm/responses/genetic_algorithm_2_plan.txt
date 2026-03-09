@@ -1,0 +1,121 @@
+## Detailed Implementation Plan
+
+### 1. Granular Fitness Function (HIGH PRIORITY)
+
+**Problem**: Current fitness is just `len(bin_weights)` — an integer. Many permutations decode to the same bin count, creating flat fitness landscapes where tournament selection cannot distinguish between solutions.
+
+**Solution**: Use the Falkenauer/Deb fitness:
+```
+fitness = - sum((bw[i] / C)^2 for i in bins) / num_bins
+```
+Minimize this value (more negative = better). This rewards solutions where bins are more tightly packed, even if they use the same number of bins. A solution with bins at 99% and 50% full is better than two bins at 75% full, which guides the search toward eliminating bins entirely.
+
+**Implementation**: Modify the `fitness()` function to return a tuple `(num_bins, -fill_score)` so primary sort is by bin count and secondary by fill quality. Or simply use the float score directly since maximizing fill percentage inherently minimizes bin count.
+
+### 2. Faster Best-Fit Decode Using `bisect` (HIGH PRIORITY)
+
+**Problem**: `decode_best_fit` does a linear scan over all bins for each item: O(n × b). For large instances with hundreds of bins, this is the main bottleneck.
+
+**Solution**: Maintain a sorted list of remaining capacities. Use `bisect.bisect_left(sorted_remaining, weight)` to find the bin with the smallest remaining capacity ≥ weight in O(log b) lookup time. After placing an item, remove the old capacity and insert the new capacity using `bisect.insort`.
+
+**Details**:
+- Keep a sorted list `sorted_rem` of `(remaining_capacity, bin_id)` pairs
+- For item weight `w`, use `bisect_left(sorted_rem, (w,))` to find first bin with remaining ≥ w
+- That bin IS the best fit (smallest remaining ≥ w)
+- Remove it (by index, O(b) but C-level), compute new remaining, `insort` it back
+- Track a parallel `bin_items` dict keyed by bin_id
+
+### 3. Improved Initial Population (MEDIUM PRIORITY)
+
+**Problem**: Only one FFD solution and a few noisy-FFD solutions seed the population. Missing other good heuristic seeds.
+
+**Solution**:
+- Add **Best Fit Decreasing (BFD)** permutation (same as FFD sort but decoded with BF — already done, but explicitly include)
+- Add **weight-class grouped** permutations: group items into large/medium/small, shuffle within groups, large first
+- Add **random restart from FFD** permutations: take FFD, apply 3-10 random swaps
+- Add **reverse-sorted** permutation (ascending weights — sometimes useful)
+- Increase number of FFD-noise variants to `pop_size // 3`
+
+### 4. Bin-Packing-Aware Crossover (MEDIUM PRIORITY)
+
+**Problem**: OX and PMX are generic permutation crossovers that don't understand bin structure. Good bin groupings are disrupted.
+
+**Solution**: Implement a **Group-Preserving Crossover**:
+1. Decode parent1 to get its bin assignments
+2. Randomly select ~50% of the bins from parent1 (preferring well-filled bins)
+3. Place items from selected bins at the front of the child permutation (in parent1's order)
+4. Remaining items are appended in parent2's permutation order
+5. This preserves good bin groupings from parent1 while using parent2's ordering for the rest
+
+Keep OX and PMX as alternatives. Use group-preserving crossover ~40% of the time, OX ~30%, PMX ~30%.
+
+### 5. Improved Mutation Operators (MEDIUM PRIORITY)
+
+**Problem**: Current mutations are generic. No bin-packing awareness.
+
+**Solution**: Add a **bin-emptying mutation**:
+1. Decode the permutation to get bins
+2. Find the least-filled bin
+3. Move items from that bin to random positions earlier in the permutation (so they get packed into other bins first during decode)
+4. This directly targets reducing bin count
+
+Also add **block-swap mutation**: identify items in the same bin and swap the entire block with another block.
+
+Weight mutation probabilities: bin-emptying 25%, swap 20%, insert 20%, inversion 20%, scramble 15%.
+
+### 6. Dual Decode Strategy (LOW-MEDIUM PRIORITY)
+
+**Problem**: Best Fit isn't always optimal. First Fit sometimes produces fewer bins.
+
+**Solution**: For fitness evaluation during the GA, use Best Fit (faster with bisect optimization). For the top `elite_count` solutions each generation, also try First Fit and keep the better decode. For the final solution, try both.
+
+### 7. Adaptive Parameters and Better Time Management (MEDIUM PRIORITY)
+
+**Problem**: The algorithm only uses ~38s of a potential 100s budget. Parameters are static.
+
+**Solution**:
+- Use `time_limit * 0.95` as the budget (supporting up to 100s)
+- **Adaptive mutation rate**: Start at 0.3, increase by 0.05 every 15 generations without improvement (cap at 0.8), reset to 0.3 on improvement
+- **Adaptive tournament size**: Start at 3, increase to 5 after 30 stagnant generations (more selection pressure)
+- **Population size**: Scale with n and time_limit. For time_limit ≥ 60s, use 80-100 for medium instances
+
+### 8. Better Restart Strategy (MEDIUM PRIORITY)
+
+**Problem**: Current restart replaces worst 2/3 with random solutions, which wastes good genetic material.
+
+**Solution**:
+- Keep top 1/4 of population
+- Generate 1/4 from heavy mutations of the best solution (5-15 swaps, inversions)
+- Generate 1/4 from FFD-noise permutations
+- Generate remaining 1/4 random
+- Increase stagnation threshold to 30 generations before restart
+- Track a global "hall of fame" (top 5 unique solutions ever found) and always include them in restarts
+
+### 9. Duplicate Elimination (LOW PRIORITY)
+
+**Problem**: Population can converge to many copies of the same solution.
+
+**Solution**: After each generation, check for duplicate fitness values. If more than 30% of population shares the same fitness tuple, replace excess duplicates with mutated versions of themselves (heavy mutation: 3-5 operations).
+
+### 10. Implementation Order
+
+1. Implement granular fitness function (§1)
+2. Implement bisect-based Best Fit decode (§2)
+3. Implement group-preserving crossover (§4)
+4. Implement bin-emptying mutation (§5)
+5. Improve initial population (§3)
+6. Implement adaptive parameters (§7)
+7. Implement better restart with hall of fame (§8)
+8. Add dual decode for elites (§6)
+9. Add duplicate elimination (§9)
+10. Tune parameters based on expected performance
+
+### Expected Impact
+- **Granular fitness**: ~40% of the improvement (better selection pressure)
+- **Faster decode**: Enables ~2-3x more generations per second
+- **Group-preserving crossover**: ~20% of improvement (preserves good structure)
+- **Bin-emptying mutation**: ~15% of improvement (directed search)
+- **Better restarts and diversity**: ~10% of improvement
+- **Other improvements**: ~15% combined
+
+Target: Reduce average ratio from 1.025 to ≤1.015.

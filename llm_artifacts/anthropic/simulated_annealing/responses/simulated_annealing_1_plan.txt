@@ -1,0 +1,108 @@
+## Detailed Implementation Plan
+
+### 1. Initial Solution (Keep FFD)
+Keep the existing First Fit Decreasing heuristic. It provides a strong starting point. No changes needed here.
+
+### 2. Revised Fitness Function
+Replace `sum(w^2)` with a composite fitness that heavily penalizes bin count:
+```
+fitness = -num_bins * PENALTY + sum(bin_weight^2)
+```
+Set `PENALTY = bin_capacity * bin_capacity * (n + 1)` so that reducing one bin always dominates any sum-of-squares change. This ensures the SA always prefers solutions with fewer bins, while within the same bin count, it prefers more consolidated solutions.
+
+### 3. Move Operators (4 types, weighted by probability)
+
+**a. Move from lightest bin (40% probability):**
+- Track the index of the lightest non-empty bin (maintain this cheaply: scan `bin_wts` to find the min when needed, or maintain a lightweight tracking variable updated after each accepted move).
+- Pick a random item from the lightest bin.
+- Pick a random target bin (not the lightest bin). If the item fits, compute delta and apply SA acceptance.
+- Rationale: This is the highest-impact operator since it directly works toward emptying the least-used bin.
+
+**b. Move from lightest bin to best-fit target (10% probability):**
+- Pick a random item from the lightest bin.
+- Find the fullest bin where the item still fits (iterate through bins, pick the one with highest `bin_wts[b]` where `bin_wts[b] + w <= bin_capacity`).
+- Always accept if feasible (greedy for this operator, since it targets consolidation).
+- Rationale: Deterministically attempts the most consolidating move possible.
+
+**c. Standard random move (25% probability):**
+- Pick a random item, pick a random different bin, attempt the move.
+- Standard SA acceptance (accept improvements always, accept worsening with Boltzmann probability).
+- Keep the current implementation logic.
+
+**d. Swap (25% probability):**
+- Pick two random items from different bins.
+- Check feasibility of swapping.
+- Standard SA acceptance.
+- Keep the current implementation logic.
+
+### 4. Time-Based Temperature Schedule
+Replace the fixed `alpha` cooling with a time-based schedule:
+```python
+fraction_remaining = max(0, (time_limit - elapsed) / time_limit)
+T = T_start * fraction_remaining
+```
+This ensures:
+- Temperature is high at the start (exploration)
+- Temperature smoothly decreases to 0 at the time limit
+- No need for manual alpha tuning or reheating logic
+- The full time budget is always utilized
+
+Set `T_start = bin_capacity * 0.5` (reduced from `bin_capacity^2 * 0.5` since the new fitness function has much larger magnitudes, and we want moderate acceptance of worse solutions).
+
+Actually, since the fitness delta for moves involves `PENALTY` terms and squared weight terms, calibrate T_start so that early acceptance probability for a single-bin-worsening move is ~30-50%. A good estimate: `T_start = bin_capacity * bin_capacity * 0.3`.
+
+Update temperature every `check_interval` iterations (when we check time anyway), not every iteration, to save computation.
+
+### 5. Periodic Restart from Best Solution
+Every time the current number of bins exceeds `best_num_bins + 3` (search has diverged too far), restart from the best solution:
+- Rebuild `bin_sets`, `bin_wts`, `item_bin` from `best_packing` and `best_bin_wts`.
+- This prevents the SA from wasting time in poor regions of the search space.
+
+Limit restarts to at most once every 5000 iterations to avoid thrashing.
+
+### 6. Lightest Bin Tracking
+Maintain a variable `lightest_bin` that stores the index of the bin with minimum weight. Update it:
+- After any move that changes bin weights (recompute by scanning `bin_wts` — this is O(num_bins) but num_bins is typically small).
+- Only update every few iterations if scanning is expensive. Since num_bins is usually < 1000, scanning is fast.
+
+Optimization: only rescan when a move is accepted, not on rejected moves.
+
+### 7. Hot Loop Optimizations
+
+**a. Increase check_interval to 2000** — time.time() calls are expensive in tight loops.
+
+**b. Inline random calls** — use `random.random()` and `random.randrange()` directly, assign to local variables at function start:
+```python
+_random = random.random
+_randrange = random.randrange
+```
+
+**c. Avoid recomputing num_bins every iteration** — maintain it as a variable, only update when bins are added/removed.
+
+**d. Pre-compute common values** — `bin_capacity` comparisons, weight lookups.
+
+**e. Batch temperature updates** — compute T once per check_interval based on elapsed time rather than multiplying alpha each iteration.
+
+### 8. Best Solution Tracking Optimization
+Only create deep copies of the solution when the bin count improves (not on every fitness improvement within the same bin count). For same-bin-count improvements, store only a lightweight marker and reconstruct when needed.
+
+Actually, since the primary goal is minimizing bins, change the logic:
+- Always save when `cur_num_bins < best_num_bins`.
+- Save when `cur_num_bins == best_num_bins and current_fitness > best_fitness` but only every 1000 iterations (not every single improvement).
+
+### 9. Dedicated Bin-Emptying Attempt (Periodic)
+Every 10000 iterations, attempt a deterministic bin-emptying procedure:
+- Identify the lightest bin.
+- For each item in that bin (sorted by weight, largest first), try to place it in the fullest bin where it fits.
+- If all items are successfully placed, the bin is emptied — update all data structures.
+- If not all items can be placed, undo all placements (keep the state unchanged).
+- This is a standard intensification technique within SA frameworks.
+
+Wait — the requirements say local search can only be included if it's a standard essential component of SA. Periodic intensification moves are standard in SA for combinatorial optimization (they're part of the neighborhood structure, not a separate local search phase). This should be fine as it's just a composite neighborhood move.
+
+### 10. Summary of Expected Impact
+- **Targeted lightest-bin moves (items 3a, 3b)**: Estimated 50% of the improvement. The current random selection almost never empties bins with multiple items.
+- **Revised fitness function (item 2)**: Estimated 20% improvement. Ensures SA always steers toward fewer bins.
+- **Time-based temperature (item 4)**: Estimated 10% improvement. Better utilization of time budget.
+- **Periodic bin-emptying (item 9)**: Estimated 15% improvement. Deterministic exploitation of near-empty bins.
+- **Hot loop optimizations (item 7)**: Estimated 5% improvement. More iterations per second.

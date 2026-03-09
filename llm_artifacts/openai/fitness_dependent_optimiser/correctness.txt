@@ -1,0 +1,20 @@
+fitness_dependent_optimiser_0_initial : CORRECT
+fitness_dependent_optimiser_0_post_plan : CORRECT
+fitness_dependent_optimiser_0_performance_3 : CORRECT
+fitness_dependent_optimiser_0_performance_4 : RUNTIME_ERROR: IndexError: pop from empty list
+             ^^^^^^^^^
+  File "/home/joshua/Documents/fyp/jxr133/llm_artifacts/openai/fitness_dependent_optimiser/responses/fitness_dependent_optimiser_0_performance_4.py", line 159, in decode
+    b = lst.pop()  # LIFO
+        ^^^^^^^^^
+IndexError: pop from empty list
+fitness_dependent_optimiser_1_initial : Time limit given to the algorithm was not respected.
+fitness_dependent_optimiser_1_correctness_1 : CORRECT
+fitness_dependent_optimiser_1_post_plan : INVALID_ANSWER: weight of instance differs to sum of bin weights
+fitness_dependent_optimiser_1_performance_4 : INVALID_ANSWER: weight of instance differs to sum of bin weights
+fitness_dependent_optimiser_2_initial : Time limit given to the algorithm was not respected.
+fitness_dependent_optimiser_2_correctness_1 : CORRECT
+fitness_dependent_optimiser_2_post_plan : CORRECT
+fitness_dependent_optimiser_2_performance_4 : CORRECT
+fitness_dependent_optimiser_0_post_plan : best 1.0269103394530041
+
+This did not always respect the time limit in testing, nor did the second best so we instead used the next best which was: fitness_dependent_optimiser_2_post_plan.py with ratio: 1.027042084802439

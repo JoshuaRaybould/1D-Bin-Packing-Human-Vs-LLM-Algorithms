@@ -1,0 +1,113 @@
+## Detailed Implementation Plan
+
+### 1. Precomputation & Lower Bound
+- Compute the L1 lower bound: `ceil(sum(weights) / bin_capacity)`.
+- Compute the L2 lower bound using the standard technique: for a threshold t = bin_capacity/2, count items > t that each need their own bin, then check if remaining items can fill the gaps. This lets us detect when we've hit optimum and stop early.
+- Store `weights` as a tuple for faster access.
+
+### 2. Faster Data Structures
+- Replace list-based bin representation with a more efficient structure:
+  - Maintain `bin_remaining` as a list.
+  - Use the `bisect` module to maintain a sorted auxiliary list of `(remaining_capacity, bin_index)` for O(log m) best-fit lookup during construction.
+  - Specifically: for best-fit, we need the smallest remaining capacity >= item weight. Use `bisect_left` on sorted remaining capacities.
+  - Maintain bins as lists of item indices (this is fine for output), but avoid `.remove()` during construction by using index-based tracking.
+
+### 3. Optimized Construction Phase
+- **construct_solution_fast(alpha)**:
+  - Pre-sort items by weight descending into an array.
+  - Use a set or boolean array `used[i]` instead of `remaining.remove()`.
+  - For RCL: maintain a pointer-based structure or just iterate over unused items (with the sorted order, we can efficiently find max/min of remaining).
+  - Actually, since items are sorted descending, max is first unused, min is last unused. Maintain `remaining_indices` as a list, and use `random.choice` on the RCL subset. Remove by swap-with-last for O(1).
+  - For bin placement: maintain sorted list of (remaining_cap, bin_id) using `bisect`. For best-fit: find the position where remaining_cap >= weight using `bisect_left`, then pick the entry at that position (smallest sufficient remaining capacity).
+  - This makes construction O(n log m) instead of O(n * m).
+
+- **construct_solution_v2_fast(alpha)**: Same optimization applied to the v2 variant.
+
+### 4. Improved Local Search
+- **Phase 1: Relocate items to tighten bins**
+  - For each item in each bin, check if it can be moved to another bin where it fits more tightly (best-fit). Only move if it strictly reduces remaining capacity at destination compared to source. This is the current single-item move but implemented more efficiently.
+  - Use sorted remaining capacities with bisect to find best-fit target in O(log m).
+
+- **Phase 2: Bin emptying (primary move)**
+  - Sort bins by load ascending.
+  - For each candidate bin to empty:
+    - Quick feasibility check: total free capacity in other bins >= load of this bin.
+    - Try to redistribute items using best-fit decreasing (sort items in bin by weight desc, place each greedily).
+    - If simple greedy fails, try a bounded backtracking: for each item that fails to place, try swapping it with a smaller item in some other bin (1-1 exchange) to create space, then retry.
+  - This is the key improvement: currently the code only tries direct redistribution. Adding swap-assisted redistribution should enable emptying bins that pure greedy cannot.
+
+- **Phase 3: Swap moves to enable future emptying**
+  - Implement (1,1)-swaps: swap item_a in bin_a with item_b in bin_b if:
+    - The swap is feasible (both bins still valid).
+    - It increases the maximum remaining capacity of the two bins (concentrating free space).
+  - Implement (2,1)-moves: move items i,j from bin_a to bin_b, move item k from bin_b to bin_a, if feasible and it increases free space concentration.
+  - After any swap round, re-attempt bin emptying.
+
+- **Efficiency**: limit swap search by only considering bins with significant remaining capacity (> some threshold) and items whose weights are close to the remaining capacity of target bins.
+
+### 5. Reactive GRASP
+- Use alpha values: [0.0, 0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0].
+- Initialize all alpha probabilities uniformly.
+- After each iteration, update the quality score for the chosen alpha:
+  - `score[alpha] += (best_known / current_solution_bins)` or similar.
+- Every K iterations (e.g., K=10), recompute selection probabilities proportional to average scores.
+- This makes the search focus on alpha values that produce good starting solutions.
+
+### 6. Time Management
+- Total time budget: use `time_limit` parameter (will be up to 100s).
+- Phase 1 (0-5% of time): FFD + local search on initial solution.
+- Phase 2 (5-95% of time): GRASP iterations.
+  - Allocate time per iteration dynamically: `min(remaining_time * 0.05, 2.0)` for local search.
+  - If current best equals lower bound, stop immediately.
+- Phase 3 (95-100% of time): Final intensive local search on best solution found.
+  - Apply the full local search with swap-assisted bin emptying on the best solution.
+- Reserve 0.05s safety margin before time_limit.
+
+### 7. Construction Diversification
+- Alternate between three construction heuristics:
+  1. RCL on item selection + best-fit placement (current construct_solution).
+  2. Sorted items with RCL perturbation + best-fit (current construct_solution_v2).
+  3. RCL on item selection + first-fit placement (adds diversity).
+- Choose among them randomly (or bias toward the one producing best results via reactive mechanism).
+
+### 8. Implementation Outline
+```
+def solve(bin_capacity, weights, time_limit):
+    # Precompute
+    n = len(weights)
+    compute lower bounds (L1, L2)
+    
+    # FFD baseline with bisect-based best-fit
+    best_solution = ffd_bestfit()
+    
+    # Initial local search (5% time)
+    best_solution = local_search_full(best_solution, deadline)
+    if len(best_solution) == lower_bound: return
+    
+    # Reactive GRASP main loop
+    alpha_scores = {alpha: 1.0 for alpha in alphas}
+    iteration = 0
+    while time_left > safety_margin:
+        alpha = weighted_random_choice(alphas, alpha_scores)
+        solution = construct(alpha, variant=random_choice)
+        solution = local_search_full(solution, deadline)
+        update alpha_scores
+        if solution < best: best = solution
+        if best == lower_bound: break
+        iteration += 1
+    
+    # Final intensive local search (5% time)
+    best = local_search_full(best, final_deadline)
+    
+    return format_output(best)
+```
+
+### 9. Key Optimizations Summary
+1. **bisect-based best-fit** in construction: O(n log m) vs O(n*m).
+2. **Swap-assisted bin emptying**: try 1-1 swaps before giving up on emptying a bin.
+3. **Reactive alpha selection**: focus on productive alpha values.
+4. **(2,1)-moves** in local search for stronger neighborhood.
+5. **Early termination** when lower bound is reached.
+6. **Better time allocation**: more time for local search on promising solutions.
+7. **O(1) list removal** via swap-to-end trick in construction.
+8. **Feasibility pre-check** before attempting bin emptying (total remaining capacity check).

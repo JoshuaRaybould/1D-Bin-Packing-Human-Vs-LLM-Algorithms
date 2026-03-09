@@ -1,0 +1,191 @@
+### 1) Keep GRASP, but restructure around **multiple constructive heuristics + adaptive selection**
+
+**Goal:** Each iteration should start from a better and more diverse initial packing, not just “best-fit into current bins”.
+
+1.1 **Implement 3–4 construction variants** (all randomized, all GRASP-valid) and pick among them each iteration.
+- **C1: Randomized Best-Fit Decreasing (RBFD)**: current construct is close; keep it but improve RCL.
+- **C2: Randomized First-Fit Decreasing (RFFD)**: sometimes beats best-fit due to different bin opening behavior.
+- **C3: Randomized “Best-Fit on residual classes”**: prioritize bins whose residual is close to the item (classic best-fit), but with explicit residual bucketization (see §3).
+- **C4 (optional but impactful): Pair-then-pack**: before main placement, try to create near-exact pairs for large items (e.g., items > C/2) by selecting complements from a multiset; then pack remaining via RBFD. This is still a constructive heuristic, not a different metaheuristic.
+
+1.2 **Adaptive strategy selection (lightweight bandit)**
+- Track per constructor: attempts, best bins achieved, average bins.
+- Use epsilon-greedy selection: with probability ε (e.g., 0.15) choose random constructor; else choose constructor with best recent performance.
+- Same for **alpha**: instead of fixed cycle, maintain a small set of alphas and pick adaptively based on recent wins.
+
+Why: You’ll spend the same time budget on more promising constructions; this typically reduces average bins before local search and improves final outcomes.
+
+---
+
+### 2) Strengthen the RCL definition and item ordering in construction
+
+2.1 **Use RCL on “placement score” not just slack**
+Current: candidates sorted by slack only; threshold slack. This ignores “future flexibility” and tends to create bins with awkward residuals.
+
+Replace candidate score with a weighted tuple, e.g.:
+- `slack_after = C - (bw + w)` (primary)
+- `slack_after_bucket = bucket(slack_after)` (prefer residuals that are common complements of remaining items)
+- `bin_age` / `bin_index` (to diversify)
+
+Define a scalar score such as:
+- `score = slack_after + λ * scarcity_penalty(slack_after)`
+where `scarcity_penalty` is higher for residuals that are rarely fillable by remaining items (approximate using a histogram of remaining weights).
+
+Then build RCL by score threshold (min + alpha*(max-min)).
+
+2.2 **Item order: switch from noisy sort to “block-wise randomized FFD”**
+- Sort items by weight descending.
+- Partition into blocks of size `k` (e.g., 10–30 depending on n).
+- Randomly shuffle within each block.
+
+This preserves “large-first” structure (important for bin packing) but gives controlled diversification; usually better than continuous noise, and cheaper.
+
+2.3 **Special handling for big items (> C/2)**
+- Maintain a multiset/bucket of remaining small items.
+- When placing a big item, preferentially choose a complement item (or small set) to bring residual close to 0 (or to a “good” residual class).
+- If found, start a new bin with the pair/tuple immediately.
+
+This reduces the common failure mode where large items each open a bin with a residual that later can’t be filled.
+
+---
+
+### 3) Make local search *much* more effective per unit time (same GRASP, better LS engine)
+
+Your local search quality is limited by (a) expensive operations (`list.remove` inside loops) and (b) weak feasibility search (scan all bins for each move).
+
+3.1 **Data structures: move from list-remove to position-aware representation**
+Implementation-ready representation changes:
+- Keep `bins: list[list[int]]` as now for output compatibility.
+- Maintain additionally:
+  - `bin_w: list[int]`
+  - `pos_in_bin: list[int]` giving index position of each item within its bin list
+  - `item_bin: list[int]`
+
+When moving an item:
+- Swap-remove from source bin list in O(1):
+  - let `idx = pos_in_bin[it]`, `last = bins[src][-1]`, swap, pop.
+  - update `pos_in_bin[last]`.
+This eliminates the repeated `remove(it)` O(m) cost.
+
+3.2 **Fast destination bin lookup via residual buckets**
+Instead of scanning all bins to find a feasible destination:
+- Maintain `residual = C - bin_w[b]`.
+- Maintain buckets: `buckets[r] = set/list of bin indices with residual r`.
+  - If C is large, bucket by ranges (e.g., size 10/20) OR use dict keyed by residual.
+- To place item weight w, you need a bin with residual >= w and ideally minimal residual after.
+  - Search residuals from w upward until you find a non-empty bucket.
+
+This makes “find best-fit destination” close to O(search steps) rather than O(#bins).
+
+3.3 **Replace current bin-elimination attempt with a standard, stronger neighborhood: “Ejection chain for one bin”**
+Current elimination: try to move each item of src directly into other bins; if any fails, rollback.
+
+Upgrade to:
+- Pick a candidate bin `src` (usually lightest or highest slack).
+- Try to reinsert its items one-by-one, but allow **limited ejections**:
+  - If item `i` doesn’t fit anywhere, pick a target bin `b` where it would fit if you remove one smaller item `j` (or a small set), move `j` into some other bin (using best-fit), and continue.
+- Limit chain length (e.g., 2–4 ejections) to keep runtime bounded.
+
+This is a classic bin packing local improvement (still local search) and is dramatically more successful at deleting bins than pure direct moves.
+
+3.4 **Add a very standard “2-opt for bins”: merge attempts**
+Occasionally (e.g., every K iterations of LS), try:
+- Choose two low-load bins a,b.
+- Try to repack `bins[a] ∪ bins[b]` into 1 bin (or into 2 bins with less slack) using a tiny exact/greedy repack:
+  - Sort those items descending and best-fit into existing bins excluding a,b, or into one new bin.
+- If you can empty one bin, accept.
+
+This targets the common situation where two sparse bins can be rearranged to free one.
+
+3.5 **Local search acceptance: focus on bin count first, then waste**
+- Keep your lexicographic objective, but in LS be stricter:
+  - Primary moves must either reduce bin count, OR improve a “promising” measure that empirically enables bin deletions: e.g., reduce the number of bins with residual in a hard-to-fill range.
+- Avoid spending too much time on swaps that only marginally change max slack.
+
+Practical rule:
+- Phase A (intensification): spend 70–80% LS time attempting bin deletions (with ejection chains + merge).
+- Phase B (light diversification): only if deletion stalls, do a small number of slack-improving relocations.
+
+3.6 **Time budgeting inside local search**
+Local search currently can run long and unpredictably.
+- Give LS a per-call time slice: e.g., `ls_deadline = start + time_limit * 0.015` (tune), OR proportional to remaining time and iteration number.
+- If the instance is large, cap the number of bin-elimination attempts per call.
+
+This ensures more GRASP iterations, which is often better than over-optimizing one start.
+
+---
+
+### 4) Add GRASP intensification with an **elite pool** (still GRASP)
+
+4.1 **Maintain an elite set of solutions**
+- Keep top E solutions by `(bins, waste)` with diversity constraint (e.g., different bin count/waste or different signature of residual histogram).
+
+4.2 **Path-relinking (GRASP-standard intensification)**
+This is a canonical GRASP component.
+- Periodically (every T iterations), take current solution and a random elite solution and perform path-relinking:
+  - Represent a solution as an assignment `item -> bin` plus bin ordering.
+  - Gradually transform current assignment toward elite by moving items to match elite bins (while preserving feasibility), applying local search at the end.
+- Keep it lightweight: only do it when current is near-best or when improvement stagnates.
+
+This tends to squeeze out the last 1–2% gap, exactly where your ratio indicates you’re stuck.
+
+---
+
+### 5) Improve iteration control and time usage up to 100s (as allowed)
+
+5.1 **Set a fixed iteration count high enough for 100s worst-case**
+Hard requirement: fixed number of iterations + periodic time checks.
+- Choose `max_iter` based on n but aimed for the 100s ceiling, e.g.:
+  - `max_iter = 2000 + 50*int(sqrt(n))` (example; final tuning needed)
+- The solver will exit early on time.
+
+5.2 **Periodic time checks with low overhead**
+- Use a counter and check time every X primitive operations / moves, not on every loop.
+
+5.3 **Stagnation handling**
+If best solution hasn’t improved in S iterations:
+- Increase diversification: higher alpha, prefer constructors C2/C4, larger block shuffle.
+- If improvement occurs, revert to more greedy settings.
+
+---
+
+### 6) Add stronger baseline(s) to seed best solution
+
+FFD is fine but not always best. Add:
+- **BFD** deterministic (best-fit decreasing)
+- **FFD with tie-breaking by residual bucket**
+Pick best as initial incumbent.
+
+This costs little and improves starting best_key, helping pruning/intensification decisions.
+
+---
+
+### 7) Correctness + output hygiene
+
+- Continue to handle items > C by isolating them (as you do), but keep them out of local search/ejection logic to avoid breaking feasibility.
+- Ensure compaction updates all auxiliary structures (item_bin, pos_in_bin, residual buckets).
+- At the end: remove empty bins, recompute bin_weights.
+
+---
+
+### 8) Concrete implementation steps (order of work)
+
+1. **Refactor solution representation**: introduce `item_bin`, `pos_in_bin`, and O(1) move operations; add `compact()` that rebuilds all structures.
+2. **Residual bucket index**: maintain buckets keyed by residual (or residual ranges) + functions `add_bin_to_bucket`, `remove_bin_from_bucket`, and `find_best_fit_bin(w, exclude=src)`.
+3. **Construction variants** C1–C3 first; validate they produce feasible packings and correct bin_w.
+4. **Adaptive selection**: implement performance tracking and epsilon-greedy choice over (constructor, alpha).
+5. **Local search Phase A**: implement bin elimination with (a) direct moves using bucket lookup, (b) bounded ejection chain.
+6. **Local search Phase B**: keep reloc/swap but restrict counts; use O(1) moves; use bucket lookup.
+7. **Elite pool + path relinking**: add only after core speedups work; keep PR infrequent and time-sliced.
+8. **Tune time slices / iteration count**: ensure it reliably uses available time but exits cleanly; verify periodic time checks.
+
+---
+
+### 9) Expected impact
+
+- **More iterations per second** due to O(1) moves and bucketed feasibility checks.
+- **Higher probability of bin-count reductions** due to ejection chains + merge neighborhoods.
+- **Better starts** from stronger construction variants + special handling of >C/2 items.
+- **Better endgame** via elite pool + path relinking.
+
+These changes specifically target reducing the average ratio (closing the ~2–3% gap) rather than just wasting time on slack reshuffling.
