@@ -1,786 +1,512 @@
 # openai
-# fitness_dependent_optimiser_0_post_plan.py
+# fitness_dependent_optimiser_2_post_plan.py
 
 import time
 import random
-from typing import List, Tuple, Dict, Optional
+from typing import List, Dict, Tuple, Optional
 
 
-def solve(bin_capacity: int, weights: list[int], time_limit: float) -> dict:
-    start = time.time()
+def solve(bin_capacity: int, weights: List[int], time_limit: float) -> Dict:
+    start = time.perf_counter()
+    deadline = start + max(0.0, time_limit)
+
     n = len(weights)
     if n == 0:
         return {"packing": [], "bin_weights": []}
 
-    C = bin_capacity
-    # --- (1) Instrumentation ---
-    total_w = sum(weights)
-    LB = (total_w + C - 1) // C
-    max_w = max(weights)
-    # If invalid instance (item larger than capacity) we still return something sensible:
-    # put each item in its own bin.
-    if max_w > C:
-        packing = [[i] for i in range(n)]
-        bw = [weights[i] for i in range(n)]
-        return {"packing": packing, "bin_weights": bw}
+    C = int(bin_capacity)
+    wts = weights
 
-    # Counters (internal)
-    decodes_full = 0
-    decodes_partial = 0
-    accepted_moves = 0
-    last_improvement_time = start
+    maxw = max(wts)
+    if maxw <= 0:
+        # All zero weights: put everything in one bin.
+        return {"packing": [list(range(n))], "bin_weights": [0]}
 
-    items = list(range(n))
+    norm_w = [w / maxw for w in wts]
 
-    # Global weight rank for heavy-prefix operations
-    weight_rank = sorted(items, key=lambda i: weights[i], reverse=True)
-    rank_pos = [0] * n
-    for r, it in enumerate(weight_rank):
-        rank_pos[it] = r
+    # -------------------- Fitness shaping (Plan §3) --------------------
+    t = max(1, C // 50)  # almost-full threshold
 
-    # ---------- (2) Strong decoder: bucketed Best-Fit with hardness tie-break + lookahead ----------
+    def fitness(bin_w: List[int]) -> Tuple[int, int, int, int]:
+        # (bins, -almost_full_count, sum_sq_slack, total_slack)
+        k = len(bin_w)
+        total_slack = 0
+        sum_sq = 0
+        almost_full = 0
+        thr = C - t
+        for bw in bin_w:
+            s = C - bw
+            total_slack += s
+            sum_sq += s * s
+            if bw >= thr:
+                almost_full += 1
+        return (k, -almost_full, sum_sq, total_slack)
 
-    def decode_best_fit_lookahead(order: List[int]) -> Tuple[List[List[int]], List[int]]:
-        """Order-based deterministic decoder with enhanced tie-breaks.
-        Returns (packing, bin_weights)."""
-        nonlocal decodes_full
-        decodes_full += 1
+    # scalar used for wf gap (Plan §3.2)
+    def scalar_from_fit(fit: Tuple[int, int, int, int]) -> float:
+        k, neg_af, sum_sq, total_slack = fit
+        # k dominates; include mild slack structure
+        # Normalize sum_sq by (C^2 * k) and total_slack by (C*n)
+        denom_sq = (C * C) * (k if k > 0 else 1)
+        denom_ts = (C * n + 1)
+        return (
+            k
+            + 0.05 * (sum_sq / (denom_sq + 1.0))
+            + 0.01 * (total_slack / (denom_ts + 1.0))
+            + 0.001 * (-neg_af)  # prefer more almost-full bins
+        )
 
+    # -------------------- Structured subset indices (Plan §1.4) --------------------
+    # Heaviest items dominate feasibility; bias updates to them.
+    idx_by_weight_desc = sorted(range(n), key=wts.__getitem__, reverse=True)
+    heavy_cut = max(1, int(0.30 * n))
+    heavy_indices = idx_by_weight_desc[:heavy_cut]
+
+    # Group by weight to allow block perturbations.
+    # For huge n, cap groups by sampling distinct weights only.
+    groups = {}
+    for i, w in enumerate(wts):
+        groups.setdefault(w, []).append(i)
+    weight_groups = list(groups.values())
+
+    # -------------------- Decoding with bitset next-nonempty (Plan §2.2) --------------------
+    # We implement Best-Fit via smallest remaining capacity r >= w.
+    # Maintain buckets[r] of bin indices with remaining capacity r, and a bitset of non-empty r.
+
+    def _bitset_find_ge(bitset: int, w: int) -> int:
+        """Return smallest r>=w with bitset having bit r set; -1 if none."""
+        # Mask off bits < w
+        masked = bitset >> w
+        if masked == 0:
+            return -1
+        # least significant set bit in masked
+        lsb = masked & -masked
+        # index in masked:
+        off = lsb.bit_length() - 1
+        return w + off
+
+    def _bitset_find_ge_limited(bitset: int, w: int, limit: int) -> int:
+        """Return up to 'limit' smallest feasible r>=w as list-like via repeated extraction.
+        Here we return just one sampled among the first few feasible r's (Plan §2.3)."""
+        masked = bitset >> w
+        if masked == 0:
+            return -1
+        # Extract up to limit options from low bits.
+        opts = []
+        m = masked
+        for _ in range(limit):
+            if m == 0:
+                break
+            lsb = m & -m
+            off = lsb.bit_length() - 1
+            opts.append(w + off)
+            m ^= lsb
+        return random.choice(opts) if opts else -1
+
+    # Deterministic choice within bucket: pop last (LIFO), but we push deterministically by bin index.
+    # (Plan §2.4): reduce extra randomness.
+
+    def decode_order(order: List[int], mix_rule: float, best_bins_so_far, best_binw_so_far) -> Tuple[List[List[int]], List[int], bool]:
+        # mix_rule: probability of using "less myopic" selection (Plan §2.3)
         bins: List[List[int]] = []
-        bw: List[int] = []
-
-        # frequency of remaining items by weight
-        freq = [0] * (C + 1)
-        for idx in order:
-            freq[weights[idx]] += 1
-
-        # buckets[rem] -> list of bin indices whose remaining capacity equals rem
+        bin_w: List[int] = []
+        # buckets[r] = stack of bin indices with remaining capacity r
         buckets: List[List[int]] = [[] for _ in range(C + 1)]
+        nonempty = 0  # bitset
 
-        # For each bin b, track current remaining capacity
-        rem_of: List[int] = []
+        check_mask = 63
 
-        def hardness(r: int) -> float:
-            # Cheap proxy: prefer remainders that are easy to fill (low hardness)
-            # so we penalize remainders lacking matching weights.
-            if r <= 0:
-                return 0.0
-            h = 0.0
-            # 1/(1+freq) => larger when freq small => harder
-            h += 1.0 / (1.0 + freq[r])
-            if r - 1 >= 1:
-                h += 1.0 / (1.0 + freq[r - 1])
-            if r + 1 <= C:
-                h += 1.0 / (1.0 + freq[r + 1])
-            return h
+        for t_idx, i in enumerate(order):
+            if (t_idx & check_mask) == 0:
+                if time.perf_counter() >= deadline:
+                    return best_bins_so_far, best_binw_so_far, True
 
-        # candidate search: find best rem >= w by scanning buckets from w upward
-        def find_best_bin_for(w: int, use_lookahead: bool) -> int:
-            # return bin index or -1
-            best_b = -1
-            best_rem2 = C + 1
-            best_h = 1e18
+            w = wts[i]
 
-            # Optionally collect top2 candidates for lookahead
-            cand1 = -1
-            cand2 = -1
-            cand1_rem2 = C + 1
-            cand2_rem2 = C + 1
-            cand1_h = 1e18
-            cand2_h = 1e18
+            chosen_bin = -1
+            chosen_r = -1
 
-            for rem in range(w, C + 1):
-                if not buckets[rem]:
-                    continue
-                # For this remainder rem, all those bins give rem2 = rem-w.
-                rem2 = rem - w
-                h = hardness(rem2)
+            # Best-Fit usually; sometimes pick among a few feasible r (adds diversity)
+            if mix_rule > 0.0 and random.random() < mix_rule:
+                chosen_r = _bitset_find_ge_limited(nonempty, w, 4)
+            else:
+                chosen_r = _bitset_find_ge(nonempty, w)
 
-                # We need best by (rem2, hardness, older bin)
-                # Pick the oldest bin (smallest index) among this remainder bucket.
-                b_oldest = buckets[rem][0]
-
-                better_local = (rem2 < best_rem2) or (rem2 == best_rem2 and (h < best_h or (h == best_h and b_oldest < best_b)))
-                if better_local:
-                    best_b = b_oldest
-                    best_rem2 = rem2
-                    best_h = h
-
-                # Track top2 distinct candidates if lookahead enabled
-                if use_lookahead:
-                    # Compare against cand1/cand2 by same criteria
-                    def better_tuple(rem2a, ha, ba, rem2b, hb, bb):
-                        return (rem2a < rem2b) or (rem2a == rem2b and (ha < hb or (ha == hb and ba < bb)))
-
-                    if cand1 == -1 or better_tuple(rem2, h, b_oldest, cand1_rem2, cand1_h, cand1):
-                        cand2, cand2_rem2, cand2_h = cand1, cand1_rem2, cand1_h
-                        cand1, cand1_rem2, cand1_h = b_oldest, rem2, h
-                    elif b_oldest != cand1 and (cand2 == -1 or better_tuple(rem2, h, b_oldest, cand2_rem2, cand2_h, cand2)):
-                        cand2, cand2_rem2, cand2_h = b_oldest, rem2, h
-
-                # Early stop: perfect fit
-                if best_rem2 == 0:
-                    break
-
-            if not use_lookahead or cand2 == -1:
-                return best_b
-
-            # (2.3) 1-step lookahead for large items: choose between cand1 and cand2
-            # using complement availability proxy: prefer rem2 that has an exact complement in remaining.
-            # Evaluate a small score; lower is better.
-            def look_score(rem2: int) -> float:
-                # encourage exact fill: if there is an item of weight rem2 remaining, good.
-                # Otherwise use hardness.
-                if rem2 <= 0:
-                    return -10.0
-                exact_bonus = -2.0 * (1.0 if freq[rem2] > 0 else 0.0)
-                near_bonus = -0.5 * (1.0 if (rem2 - 1 >= 1 and freq[rem2 - 1] > 0) else 0.0)
-                near_bonus += -0.5 * (1.0 if (rem2 + 1 <= C and freq[rem2 + 1] > 0) else 0.0)
-                return hardness(rem2) + exact_bonus + near_bonus
-
-            s1 = look_score(cand1_rem2)
-            s2 = look_score(cand2_rem2)
-            if s2 < s1 - 1e-12:
-                return cand2
-            return cand1
-
-        # How many early items to allow lookahead for
-        # Keep it modest and scale slightly with n.
-        K = 30 if n < 150 else 50 if n < 500 else 80
-
-        for t, idx in enumerate(order):
-            w = weights[idx]
-            freq[w] -= 1
-
-            use_look = (t < K and w * 10 >= 6 * C)  # w >= 0.6C
-            b = find_best_bin_for(w, use_lookahead=use_look)
-            if b == -1:
+            if chosen_r == -1:
                 # open new bin
-                b = len(bins)
-                bins.append([idx])
-                bw.append(w)
-                rem = C - w
-                rem_of.append(rem)
-                buckets[rem].append(b)
+                j = len(bins)
+                bins.append([i])
+                bw = w
+                bin_w.append(bw)
+                rem = C - bw
+                buckets[rem].append(j)
+                nonempty |= (1 << rem)
             else:
-                # remove b from old bucket (swap-remove in list)
-                old_rem = rem_of[b]
-                lst = buckets[old_rem]
-                # find and remove b (bucket sizes tend to be small)
-                # keep order in bucket: older first, so removal by linear scan.
-                for k in range(len(lst)):
-                    if lst[k] == b:
-                        lst.pop(k)
-                        break
+                # take a bin from that remaining capacity
+                bucket = buckets[chosen_r]
+                chosen_bin = bucket.pop()
+                if not bucket:
+                    nonempty &= ~(1 << chosen_r)
 
-                bins[b].append(idx)
-                bw[b] += w
-                new_rem = old_rem - w
-                rem_of[b] = new_rem
-                buckets[new_rem].append(b)
+                bins[chosen_bin].append(i)
+                bw = bin_w[chosen_bin] + w
+                bin_w[chosen_bin] = bw
+                rem = C - bw
+                buckets[rem].append(chosen_bin)
+                nonempty |= (1 << rem)
 
-        return bins, bw
+        return bins, bin_w, False
 
-    # (7.1) Partial screening: decode only heavy prefix and count bins opened
-    def partial_bins_used(order: List[int], m: int) -> int:
-        nonlocal decodes_partial
-        decodes_partial += 1
-        if m <= 0:
-            return 0
-        # Use simple best-fit scan for partial; keep it cheap.
-        bw_local: List[int] = []
-        for idx in order[:m]:
-            w = weights[idx]
-            best = -1
-            best_rem2 = C + 1
-            for b in range(len(bw_local)):
-                rem = C - bw_local[b]
-                if w <= rem:
-                    rem2 = rem - w
-                    if rem2 < best_rem2:
-                        best_rem2 = rem2
-                        best = b
-                        if rem2 == 0:
-                            break
-            if best == -1:
-                bw_local.append(w)
-            else:
-                bw_local[best] += w
-        return len(bw_local)
+    # -------------------- Portfolio decoding per candidate (Plan §2.1) --------------------
+    # Build a few alternative induced orders cheaply.
 
-    # ---------- Fitness / comparison ----------
-    def fitness_from(bins: List[List[int]], bw: List[int]) -> Tuple[int, int]:
-        waste = 0
-        for s in bw:
-            waste += (C - s)
-        return (len(bins), waste)
+    def build_orders(priorities: List[float], K: int) -> List[List[int]]:
+        # Base order: (priority, weight) desc
+        base = list(range(n))
+        base.sort(key=lambda i: (priorities[i], wts[i]), reverse=True)
+        if K <= 1:
+            return [base]
 
-    def better(f1: Tuple[int, int], f2: Tuple[int, int]) -> bool:
-        return f1[0] < f2[0] or (f1[0] == f2[0] and f1[1] < f2[1])
+        orders = [base]
 
-    # ---------- (6) Better initialization: multiple deterministic seed orders ----------
-    items_desc = sorted(items, key=lambda i: weights[i], reverse=True)
-    items_asc = sorted(items, key=lambda i: weights[i])
+        # Variant A: flip tie-break
+        if K >= 2:
+            a = list(range(n))
+            a.sort(key=lambda i: (priorities[i], -wts[i]), reverse=True)
+            orders.append(a)
 
-    def order_by_mod(k: int) -> List[int]:
-        # group by weight mod k (descending mod group, then descending weight)
-        return sorted(items, key=lambda i: ((weights[i] % k), weights[i]), reverse=True)
+        # Variant B: blended score
+        if K >= 3:
+            alpha = 0.85
+            b = list(range(n))
+            b.sort(key=lambda i: (alpha * priorities[i] + (1.0 - alpha) * norm_w[i], wts[i]), reverse=True)
+            orders.append(b)
 
-    def order_by_half_closeness() -> List[int]:
-        # prioritize medium items close to C/2 (descending distance closeness => small |w-C/2| first)
-        half = C / 2.0
-        return sorted(items, key=lambda i: (abs(weights[i] - half), -weights[i]))
+        # Variant C (rare/only if K==4): segment reversal on base to diversify while keeping weight structure
+        if K >= 4:
+            c = base[:]  # start from base
+            seg = max(10, n // 10)
+            if seg < n:
+                s = random.randrange(0, n - seg + 1)
+                c[s:s + seg] = reversed(c[s:s + seg])
+            orders.append(c)
 
-    def heavy_front_random_tail() -> List[int]:
-        # keep heavy prefix fixed by weight rank, shuffle the rest
-        cut = min(n, 25)
-        head = items_desc[:cut]
-        tail = items_desc[cut:]
-        random.shuffle(tail)
-        return head + tail
+        return orders
 
-    seed_orders: List[List[int]] = []
-    seed_orders.append(items_desc)
-    seed_orders.append(items_asc)
-    seed_orders.append(order_by_half_closeness())
-    for k in (3, 4, 5):
-        if C >= k:
-            seed_orders.append(order_by_mod(k))
-    seed_orders.append(heavy_front_random_tail())
-
-    # de-dup seeds while preserving order
-    seen_seed = set()
-    uniq_seeds = []
-    for o in seed_orders:
-        t = tuple(o)
-        if t not in seen_seed:
-            seen_seed.add(t)
-            uniq_seeds.append(o)
-    seed_orders = uniq_seeds
-
-    # ---------- Population representation with cached decode structure (4.1) ----------
-    # Each scout stores: order, fit, bins, bw, signature
-    class Scout:
-        __slots__ = ("order", "fit", "bins", "bw", "sig")
-
-        def __init__(self, order: List[int], bins: List[List[int]], bw: List[int], fit: Tuple[int, int], sig: Tuple[int, ...]):
-            self.order = order
-            self.bins = bins
-            self.bw = bw
-            self.fit = fit
-            self.sig = sig
-
-    def signature_from_bw(bw: List[int]) -> Tuple[int, ...]:
-        # packing-based signature: sorted bin weights, plus a short prefix of largest bins
-        # (tuple kept reasonably small)
-        s = sorted(bw)
-        if len(s) <= 24:
-            return tuple(s)
-        top = tuple(sorted(s[-6:], reverse=True))
-        # include length to avoid ambiguity
-        return (len(s),) + top + tuple(s[:6])
-
-    # ---------- Permutation perturbations / mutations ----------
-    def random_perturb(base: List[int]) -> List[int]:
-        a = base[:]
-        if n <= 1:
-            return a
-        k = 3 if n < 120 else 4
-        for _ in range(k):
-            r = random.random()
-            if r < 0.6:
-                i = random.randrange(n)
-                j = random.randrange(n)
-                a[i], a[j] = a[j], a[i]
-            else:
-                i = random.randrange(n)
-                j = random.randrange(n)
-                if i > j:
-                    i, j = j, i
-                if j - i >= 2:
-                    a[i:j] = reversed(a[i:j])
-        return a
-
-    def mutate(order: List[int], rate: float) -> List[int]:
-        a = order[:]
-        if n <= 1:
-            return a
-        swaps = 1 if rate <= 0.22 else 2 if rate <= 0.55 else 3
-        for _ in range(swaps):
-            r = random.random()
-            if r < 0.72:
-                i = random.randrange(n)
-                j = random.randrange(n)
-                a[i], a[j] = a[j], a[i]
-            else:
-                i = random.randrange(n)
-                j = random.randrange(n)
-                if i > j:
-                    i, j = j, i
-                if j - i >= 2:
-                    a[i:j] = reversed(a[i:j])
-        return a
-
-    # Precompute complement groups from a packing (4.3)
-    def tight_groups_from_packing(bins: List[List[int]], bw: List[int], max_groups: int = 20) -> List[List[int]]:
-        # Prefer bins with small waste and small group sizes (2-3 items)
-        groups = []
-        candidates = list(range(len(bins)))
-        candidates.sort(key=lambda b: (C - bw[b], len(bins[b])))
-        for b in candidates:
-            if len(groups) >= max_groups:
-                break
-            if len(bins[b]) < 2 or len(bins[b]) > 4:
-                continue
-            waste = C - bw[b]
-            if waste > max(3, C // 30):
-                continue
-            groups.append(bins[b][:])
-        return groups
-
-    def move_groups_consecutive(order: List[int], groups: List[List[int]], how_many: int) -> List[int]:
-        if not groups or how_many <= 0:
-            return order[:]
-        a = order[:]
-        pos = {it: i for i, it in enumerate(a)}
-
-        chosen = []
-        for _ in range(min(how_many, len(groups))):
-            chosen.append(groups[random.randrange(len(groups))])
-
-        # apply each group: remove its items then insert them consecutively
-        for g in chosen:
-            # ensure unique items
-            g2 = list(dict.fromkeys(g))
-            # sort by descending weight
-            g2.sort(key=lambda it: weights[it], reverse=True)
-
-            # anchor: earliest current position among group items
-            anchor = min(pos[it] for it in g2 if it in pos)
-
-            # remove items (in descending index order)
-            rem_idx = sorted((pos[it] for it in g2 if it in pos), reverse=True)
-            for idx in rem_idx:
-                a.pop(idx)
-            # clamp anchor
-            if anchor > len(a):
-                anchor = len(a)
-            for j, it in enumerate(g2):
-                a.insert(anchor + j, it)
-
-            # rebuild pos locally (groups are few)
-            pos = {it: i for i, it in enumerate(a)}
-        return a
-
-    # (4.4) Heavy-prefix preservation alignment toward best
-    def heavy_prefix_align(order: List[int], best_order: List[int], prefix_len: int) -> List[int]:
-        if prefix_len <= 0:
-            return order[:]
-        prefix_len = min(prefix_len, n)
-        # determine the set of heavy items (by global weight rank)
-        heavy_set = set(weight_rank[:prefix_len])
-        # Extract heavy items in the order they appear in best
-        heavy_in_best = [it for it in best_order if it in heavy_set]
-        # Build new order: place heavy_in_best first, then the remaining items as they appear in current order
-        tail = [it for it in order if it not in heavy_set]
-        return heavy_in_best + tail
-
-    # (4.2) Bin-emptying guided relocation: permutation edits based on decoded bins
-    def bin_emptying_move(order: List[int], bins: List[List[int]], bw: List[int], pace: float) -> List[int]:
-        if len(bins) <= 1:
-            return order[:]
-        # pick candidate bin: small weight or high waste
-        cand_bins = list(range(len(bins)))
-        cand_bins.sort(key=lambda b: (bw[b], C - bw[b]), reverse=False)
-        # choose among a few, biased by pace (higher pace -> more aggressive on worst bins)
-        pick_pool = min(6, len(cand_bins))
-        bsel = cand_bins[random.randrange(pick_pool)] if random.random() < 0.75 else cand_bins[-1]
-
-        items_to_move = bins[bsel][:]
-        if not items_to_move:
-            return order[:]
-        # move heavier first
-        items_to_move.sort(key=lambda it: weights[it], reverse=True)
-
-        # compute remaining capacities of target bins (excluding selected bin)
-        rem = [C - bw[b] for b in range(len(bins))]
-
-        # build a mapping item -> target_bin (greedy best-fit by remaining)
-        targets: Dict[int, int] = {}
-        for it in items_to_move:
-            w = weights[it]
-            best_b = -1
-            best_rem2 = C + 1
-            for b in range(len(bins)):
-                if b == bsel:
-                    continue
-                if w <= rem[b]:
-                    rem2 = rem[b] - w
-                    if rem2 < best_rem2:
-                        best_rem2 = rem2
-                        best_b = b
-                        if rem2 == 0:
-                            break
-            if best_b != -1:
-                targets[it] = best_b
-                rem[best_b] -= w
-            else:
-                # cannot place; keep it in its own area (no-op for this item)
-                targets[it] = -1
-
-        # Convert reassignment to order edits: move each item right after a representative of target bin.
-        a = order[:]
-        pos = {it: i for i, it in enumerate(a)}
-
-        # representative per target bin: first item in that bin
-        rep = {}
-        for b in range(len(bins)):
-            if b == bsel:
-                continue
-            if bins[b]:
-                rep[b] = bins[b][0]
-
-        # Remove items to move (in descending index order)
-        rem_positions = sorted((pos[it] for it in items_to_move if it in pos), reverse=True)
-        for p in rem_positions:
-            a.pop(p)
-
-        # Recompute positions after removals
-        pos = {it: i for i, it in enumerate(a)}
-
-        # Insert items near their reps; add noise depending on (1-pace)
-        noise = int((1.0 - pace) * 10)
-        for it in items_to_move:
-            tb = targets.get(it, -1)
-            if tb == -1 or tb not in rep or rep[tb] not in pos:
-                # fallback: insert near front for heavy items, else random
-                base = min(len(a), 5)
-                ins = base if weights[it] * 10 >= 7 * C else random.randrange(len(a) + 1)
-            else:
-                ins = pos[rep[tb]] + 1
-            if noise > 0:
-                ins += random.randint(-noise, noise)
-            if ins < 0:
-                ins = 0
-            if ins > len(a):
-                ins = len(a)
-            a.insert(ins, it)
-            # update pos locally (cheap incremental update avoided; rebuild occasionally)
-            if len(items_to_move) <= 10:
-                pos = {x: i for i, x in enumerate(a)}
-        return a
-
-    # ---------- (3) Pace function uses gap-to-LB and normalized waste ----------
-    def pace_from(f: Tuple[int, int], bestf: Tuple[int, int]) -> float:
-        fb, fw = f
-        bb, bwaste = bestf
-
-        gap = fb - LB
-        best_gap = bb - LB
-
-        # bins difference dominates
-        if fb > bb:
-            # worse bin count: strong pull
-            base = 0.75 + 0.10 * min(2, fb - bb)
+    def decode_portfolio(priorities: List[float], it: int, max_iters: int,
+                         best_bins_so_far, best_binw_so_far) -> Tuple[List[List[int]], List[int], Tuple[int, int, int, int], bool]:
+        # Adaptive K by n (Plan §2.1)
+        if n <= 200:
+            K = 4
+        elif n <= 800:
+            K = 3
         else:
-            # equal bins: pace depends on whether we're above LB and waste
-            if best_gap > 0:
-                base = 0.35
-            else:
-                # already at LB: stabilize
-                base = 0.18
+            K = 2
 
-        # incorporate gap-to-LB
-        if gap > best_gap:
-            base = min(1.0, base + 0.15)
-        elif gap == best_gap and fb == bb and fw > bwaste:
-            base = min(1.0, base + 0.08)
+        # Placement mix prob: a bit higher early, lower later (Plan §2.3)
+        base_p = 0.18 if it < max_iters * 0.4 else 0.10
 
-        # normalized waste per bin to smooth
-        if fb > 0:
-            wpn = (fw / fb) / C  # ~ [0,1)
-        else:
-            wpn = 0.0
-        base = min(1.0, base + 0.10 * wpn)
+        orders = build_orders(priorities, K)
 
-        return max(0.06, min(1.0, base))
+        best_local_bins = None
+        best_local_binw = None
+        best_local_fit = None
 
-    # ---------- Build initial population (6 + 9) ----------
-    # Slightly higher pop; keep bounded.
-    pop_size = max(30, min(80, 28 + n // 20))
+        for ord_idx, order in enumerate(orders):
+            # slightly vary mix between variants
+            mix_p = base_p * (1.0 if ord_idx == 0 else 0.8)
+            bins, binw, timed_out = decode_order(order, mix_p, best_bins_so_far, best_binw_so_far)
+            if timed_out:
+                return best_bins_so_far, best_binw_so_far, fitness(best_binw_so_far), True
+            fitv = fitness(binw)
+            if best_local_fit is None or fitv < best_local_fit:
+                best_local_fit = fitv
+                best_local_bins = bins
+                best_local_binw = binw
 
-    # Start with best among seeds
-    best_order: List[int] = items_desc[:]
-    best_packing, best_bw = decode_best_fit_lookahead(best_order)
-    best_fit = fitness_from(best_packing, best_bw)
-    best_sig = signature_from_bw(best_bw)
+        return best_local_bins, best_local_binw, best_local_fit, False
 
-    # initialize scouts with seeds + perturbed/random
-    scouts: List[Scout] = []
+    # -------------------- Initialization (Plan §5.1) --------------------
+    lo, hi = -1.0, 1.0
 
-    # Add decoded seeds
-    for o in seed_orders:
-        bins, bw = decode_best_fit_lookahead(o)
-        f = fitness_from(bins, bw)
-        sig = signature_from_bw(bw)
-        scouts.append(Scout(o[:], bins, bw, f, sig))
-        if better(f, best_fit):
-            best_fit, best_order, best_packing, best_bw, best_sig = f, o[:], bins, bw, sig
+    def clamp01(x: float) -> float:
+        return lo if x < lo else (hi if x > hi else x)
 
-    # Fill the rest
-    while len(scouts) < pop_size:
-        if len(scouts) % 3 == 0:
-            o = random_perturb(best_order)
-        elif len(scouts) % 3 == 1:
-            o = heavy_front_random_tail()
-        else:
-            o = items[:]
-            random.shuffle(o)
-        bins, bw = decode_best_fit_lookahead(o)
-        f = fitness_from(bins, bw)
-        sig = signature_from_bw(bw)
-        scouts.append(Scout(o, bins, bw, f, sig))
-        if better(f, best_fit):
-            best_fit, best_order, best_packing, best_bw, best_sig = f, o[:], bins, bw, sig
+    def seeded_priority_vector(kind: int) -> List[float]:
+        # Deterministic-ish seeds (no random needed, but fine if used elsewhere)
+        if kind == 0:
+            # FFD-like: weight + tiny index jitter
+            return [clamp01(0.9 * norm_w[i] + 1e-6 * (n - i)) for i in range(n)]
+        if kind == 1:
+            # BFD-like: weight + tiny increasing jitter (different tie)
+            return [clamp01(0.9 * norm_w[i] + 1e-6 * i) for i in range(n)]
+        if kind == 2:
+            # Complement: items near C/2 first
+            half = C / 2.0
+            # closer to half -> higher priority
+            return [clamp01(1.0 - abs(half - wts[i]) / (half + 1.0)) for i in range(n)]
+        if kind == 3:
+            # Mixed: mostly weight
+            return [clamp01(0.7 * norm_w[i] + 0.3 * (2.0 * random.random() - 1.0) * 0.2) for i in range(n)]
+        if kind == 4:
+            # Another mixed: stronger weight
+            return [clamp01(1.0 * norm_w[i] + (2.0 * random.random() - 1.0) * 0.15) for i in range(n)]
+        # fallback noisy
+        noise_scale = 0.25
+        return [clamp01(norm_w[i] + random.uniform(-noise_scale, noise_scale)) for i in range(n)]
 
-    # complement groups from best for operator 4.3
-    best_groups = tight_groups_from_packing(best_packing, best_bw)
+    # -------------------- Pop sizing and iteration budgeting (Plan §4) --------------------
+    pop_size = int(20 + 6 * (n ** 0.5))
+    if pop_size < 25:
+        pop_size = 25
+    elif pop_size > 80:
+        pop_size = 80
 
-    # precomputed best positions (7.2)
-    best_pos = [0] * n
-    for i, it in enumerate(best_order):
-        best_pos[it] = i
+    if n <= 200:
+        max_iters = 2000
+    elif n <= 800:
+        max_iters = 1200
+    else:
+        max_iters = 800
 
-    def update_best(order: List[int], bins: List[List[int]], bw: List[int], fit: Tuple[int, int], sig: Tuple[int, ...]):
-        nonlocal best_order, best_packing, best_bw, best_fit, best_sig, best_groups, best_pos, last_improvement_time
-        best_order = order[:]
-        best_packing = bins
-        best_bw = bw
-        best_fit = fit
-        best_sig = sig
-        best_groups = tight_groups_from_packing(best_packing, best_bw)
-        for i, it in enumerate(best_order):
-            best_pos[it] = i
-        last_improvement_time = time.time()
+    # -------------------- FDO population state --------------------
+    scouts: List[List[float]] = []
+    scout_fit: List[Tuple[int, int, int, int]] = []
+    scout_bins: List[List[List[int]]] = []
+    scout_binw: List[List[int]] = []
+    no_improve_i: List[int] = []
 
-    # Guided insertion using cached best_pos
-    def guided_insertion(order: List[int], strength: float) -> List[int]:
-        if n <= 1:
-            return order[:]
-        a = order[:]
-        m = 1 + int(strength * min(36, n))
-        for _ in range(m):
-            if random.random() < 0.7:
-                i = random.randrange(min(n, 30))
-            else:
-                i = random.randrange(n)
-            item = a[i]
-            a.pop(i)
-            target = best_pos[item]
-            ins = int((target / max(1, n - 1)) * max(1, len(a) - 1))
-            noise = int((1.0 - strength) * 9)
-            if noise > 0:
-                ins += random.randint(-noise, noise)
-            if ins < 0:
-                ins = 0
-            if ins > len(a):
-                ins = len(a)
-            a.insert(ins, item)
-        return a
+    best_pos: Optional[List[float]] = None
+    best_fit: Optional[Tuple[int, int, int, int]] = None
+    best_bins: List[List[int]] = []
+    best_binw: List[int] = []
 
-    # ---------- (5.1) Annealed acceptance on secondary objective ----------
-    def accept_move(cur_fit: Tuple[int, int], new_fit: Tuple[int, int], elapsed: float, limit: float) -> bool:
-        if better(new_fit, cur_fit):
-            return True
-        # same bin-count but worse waste: sometimes accept early with threshold
-        if new_fit[0] == cur_fit[0] and new_fit[1] > cur_fit[1]:
-            progress = 1.0 if limit <= 1e-9 else min(1.0, elapsed / limit)
-            p0 = 0.15
-            p = p0 * (1.0 - progress) * (1.0 - progress)
-            # threshold: allow limited regression
-            bins_cnt = max(1, new_fit[0])
-            delta = new_fit[1] - cur_fit[1]
-            # allow up to ~ (0.03*C per bin) early
-            thr = int((0.03 + 0.04 * (1.0 - progress)) * C * bins_cnt)
-            if delta <= thr and random.random() < p:
-                return True
-        # exact tie: tiny acceptance for churn
-        if new_fit == cur_fit and random.random() < 0.03:
-            return True
-        return False
-
-    # ---------- (5.2) Diversity management by signatures ----------
-    def signature_counts() -> Dict[Tuple[int, ...], int]:
-        d: Dict[Tuple[int, ...], int] = {}
-        for sc in scouts:
-            d[sc.sig] = d.get(sc.sig, 0) + 1
-        return d
-
-    # ---------- Main loop: time-driven with fixed iteration cap (8) ----------
-    # Respect provided time_limit strictly.
-    effective_limit = max(0.0, time_limit)
-
-    # large fixed iteration budget; time checks will stop earlier
-    iter_budget = 20000 if n < 400 else 12000 if n < 1200 else 8000
-
-    check_every = 25
-
-    # adaptive restart trigger
-    no_improve_trigger = max(0.15 * effective_limit, 0.8)
-
-    # partial screening parameter
-    partial_M = min(n, 120)
-
-    for it in range(iter_budget):
-        if it % check_every == 0:
-            if (time.time() - start) >= effective_limit:
-                break
-
-        elapsed = time.time() - start
-        if elapsed >= effective_limit:
+    # Initial seeds first, then random/noisy
+    seed_kinds = [0, 1, 2, 3, 4]
+    init_count = pop_size
+    for p in range(init_count):
+        if time.perf_counter() >= deadline:
             break
 
-        best_bins = best_fit[0]
-        best_gap = best_bins - LB
+        if p < len(seed_kinds):
+            pos = seeded_priority_vector(seed_kinds[p])
+        elif p < len(seed_kinds) + pop_size // 3:
+            pos = [random.uniform(lo, hi) for _ in range(n)]
+        else:
+            # weight-based with noise
+            ns = 0.35 if p < (2 * pop_size) // 3 else 0.18
+            pos = [clamp01(norm_w[i] + random.uniform(-ns, ns)) for i in range(n)]
 
-        # occasional diversity repair if many identical packings
-        if it % 120 == 119:
-            counts = signature_counts()
-            # if too concentrated, reinit a couple
-            most = max(counts.values()) if counts else 1
-            if most >= max(4, pop_size // 5):
-                # reinitialize 2-4 scouts (not best)
-                k = 2 if pop_size < 50 else 4
-                for _ in range(k):
-                    if (time.time() - start) >= effective_limit:
-                        break
-                    idx = random.randrange(pop_size)
-                    if scouts[idx].fit == best_fit:
-                        continue
-                    # new constructive
-                    o = heavy_front_random_tail() if random.random() < 0.5 else random_perturb(items_desc)
-                    bins, bw = decode_best_fit_lookahead(o)
-                    f = fitness_from(bins, bw)
-                    sig = signature_from_bw(bw)
-                    scouts[idx] = Scout(o, bins, bw, f, sig)
-                    if better(f, best_fit):
-                        update_best(o, bins, bw, f, sig)
+        bins, binw, fitv, timed_out = decode_portfolio(pos, 0, max_iters, best_bins, best_binw)
+        if timed_out:
+            return {"packing": best_bins, "bin_weights": best_binw}
 
-        # (6.2) Adaptive restarts when no improvement for some time
-        if effective_limit > 0.0 and (time.time() - last_improvement_time) >= no_improve_trigger and it % 20 == 0:
-            # restart 20-35% of population (excluding best)
-            frac = 0.22 if best_gap <= 1 else 0.32
-            k = max(1, int(frac * pop_size))
-            # pick worst by fitness
-            idxs = list(range(pop_size))
-            idxs.sort(key=lambda i: (scouts[i].fit[0], scouts[i].fit[1]), reverse=True)
-            restarted = 0
-            for i in idxs:
-                if restarted >= k:
+        scouts.append(pos)
+        scout_fit.append(fitv)
+        scout_bins.append(bins)
+        scout_binw.append(binw)
+        no_improve_i.append(0)
+
+        if best_fit is None or fitv < best_fit:
+            best_fit = fitv
+            best_pos = pos[:]
+            best_bins = [b[:] for b in bins]
+            best_binw = binw[:]
+
+    if not scouts:
+        return {"packing": [], "bin_weights": []}
+
+    assert best_pos is not None and best_fit is not None
+
+    # -------------------- FDO main loop with elites + restarts (Plan §1) --------------------
+    E = 5 if pop_size >= 25 else 3
+    Sg = 40
+    Si = 25
+    no_improve_global = 0
+
+    def pick_leader(elite_indices: List[int]) -> List[float]:
+        # Roulette biased by rank: weight ~ 1/(rank+1)
+        weights_rank = [1.0 / (r + 1) for r in range(len(elite_indices))]
+        chosen = random.choices(elite_indices, weights=weights_rank, k=1)[0]
+        return scouts[chosen]
+
+    def reinit_scout(strategy: int) -> List[float]:
+        # 0: seeded, 1: random, 2: mixed noisy
+        if strategy == 0:
+            return seeded_priority_vector(random.choice(seed_kinds))
+        if strategy == 1:
+            return [random.uniform(lo, hi) for _ in range(n)]
+        ns = 0.30
+        return [clamp01(norm_w[i] + random.uniform(-ns, ns)) for i in range(n)]
+
+    for it in range(max_iters):
+        if time.perf_counter() >= deadline:
+            break
+
+        # Build elite set (Plan §1.1)
+        idx_sorted = sorted(range(len(scouts)), key=lambda i: scout_fit[i])
+        elite_indices = idx_sorted[: min(E, len(idx_sorted))]
+
+        # Refresh global best from population
+        best_idx = idx_sorted[0]
+        if scout_fit[best_idx] < best_fit:
+            best_fit = scout_fit[best_idx]
+            best_pos = scouts[best_idx][:]
+            best_bins = [b[:] for b in scout_bins[best_idx]]
+            best_binw = scout_binw[best_idx][:]
+            no_improve_global = 0
+        else:
+            no_improve_global += 1
+
+        best_scalar = scalar_from_fit(best_fit)
+
+        # Adaptive exploration when stuck (Plan §1.3)
+        base_noise = 0.14 * (1.0 - it / max_iters)
+        if no_improve_global >= Sg // 2:
+            base_noise *= 1.7
+        if base_noise > 0.25:
+            base_noise = 0.25
+
+        wf_max = 1.0
+        if no_improve_global >= Sg // 2:
+            wf_max = 1.5
+
+        # Partial restart on global stagnation (Plan §1.2)
+        if no_improve_global >= Sg:
+            no_improve_global = 0
+            worst_count = max(1, (len(scouts) + 3) // 4)  # ceil 25%
+            worst_indices = idx_sorted[-worst_count:]
+            for wi in worst_indices:
+                if time.perf_counter() >= deadline:
                     break
-                if (time.time() - start) >= effective_limit:
-                    break
-                if scouts[i].fit == best_fit:
-                    continue
-                if random.random() < 0.5:
-                    # apply bin-emptying move to best, then perturb
-                    o = bin_emptying_move(best_order, best_packing, best_bw, pace=0.85)
-                    o = random_perturb(o)
-                else:
-                    # new randomized constructive
-                    base = seed_orders[random.randrange(len(seed_orders))]
-                    o = random_perturb(base)
-                    if random.random() < 0.25:
-                        o = heavy_front_random_tail()
-                bins, bw = decode_best_fit_lookahead(o)
-                f = fitness_from(bins, bw)
-                sig = signature_from_bw(bw)
-                scouts[i] = Scout(o, bins, bw, f, sig)
-                restarted += 1
-                if better(f, best_fit):
-                    update_best(o, bins, bw, f, sig)
-            last_improvement_time = time.time()  # avoid repeated triggers
+                pos_new = reinit_scout(strategy=0 if random.random() < 0.6 else 1)
+                bins, binw, fitv, timed_out = decode_portfolio(pos_new, it, max_iters, best_bins, best_binw)
+                if timed_out:
+                    return {"packing": best_bins, "bin_weights": best_binw}
+                scouts[wi] = pos_new
+                scout_fit[wi] = fitv
+                scout_bins[wi] = bins
+                scout_binw[wi] = binw
+                no_improve_i[wi] = 0
 
-        # Iterate scouts
-        # small random permutation of scout visitation to reduce bias
-        order_scouts = list(range(pop_size))
-        random.shuffle(order_scouts)
-
-        for si in order_scouts:
-            if (time.time() - start) >= effective_limit:
+        # Update scouts (steady-state)
+        for i in range(len(scouts)):
+            if time.perf_counter() >= deadline:
                 break
 
-            sc = scouts[si]
-            cur_order = sc.order
-            cur_fit = sc.fit
-
-            pace = pace_from(cur_fit, best_fit)
-
-            # (9) Operator schedule driven by bin relation
-            if cur_fit == best_fit:
-                # best scout: mostly micro-mutate, occasional bin-empty attempt
-                if random.random() < 0.70:
-                    new_order = mutate(cur_order, rate=0.18)
+            # Scout-level stagnation handling (Plan §1.2)
+            if no_improve_i[i] >= Si:
+                no_improve_i[i] = 0
+                if random.random() < 0.5:
+                    # opposition-based
+                    old = scouts[i]
+                    pos = [clamp01(lo + hi - x + random.uniform(-0.05, 0.05)) for x in old]
                 else:
-                    new_order = bin_emptying_move(cur_order, sc.bins, sc.bw, pace=0.35)
-                    if random.random() < 0.30:
-                        new_order = mutate(new_order, rate=0.20)
+                    pos = reinit_scout(strategy=0 if random.random() < 0.7 else 2)
+
+                bins, binw, fitv, timed_out = decode_portfolio(pos, it, max_iters, best_bins, best_binw)
+                if timed_out:
+                    return {"packing": best_bins, "bin_weights": best_binw}
+
+                scouts[i] = pos
+                scout_fit[i] = fitv
+                scout_bins[i] = bins
+                scout_binw[i] = binw
+
+                if fitv < best_fit:
+                    best_fit = fitv
+                    best_pos = pos[:]
+                    best_bins = [b[:] for b in bins]
+                    best_binw = binw[:]
+                    no_improve_global = 0
+                continue
+
+            pos = scouts[i]
+            fit_i = scout_fit[i]
+            scalar_i = scalar_from_fit(fit_i)
+
+            # wf depends on gap
+            if scalar_i <= best_scalar:
+                wf = 0.0
             else:
-                if cur_fit[0] > best_fit[0]:
-                    # worse in bin count: strong exploitation
-                    r = random.random()
-                    if r < 0.60:
-                        pfx = 20 if n < 200 else 35
-                        pfx = min(pfx, n)
-                        new_order = heavy_prefix_align(cur_order, best_order, prefix_len=pfx)
-                        if random.random() < 0.70:
-                            new_order = guided_insertion(new_order, strength=min(1.0, pace))
-                        if random.random() < 0.50:
-                            new_order = mutate(new_order, rate=0.25 + 0.35 * (1.0 - pace))
-                    elif r < 0.90:
-                        new_order = guided_insertion(cur_order, strength=min(1.0, pace))
-                        if random.random() < 0.55:
-                            new_order = mutate(new_order, rate=0.22 + 0.45 * (1.0 - pace))
+                gap = (scalar_i - best_scalar) / (best_scalar + 1e-9)
+                wf = gap
+                if wf > wf_max:
+                    wf = wf_max
+
+            # Choose leader from elites (Plan §1.1)
+            leader_pos = pick_leader(elite_indices)
+
+            # Structured dimension updates (Plan §1.4)
+            idxset = None
+            block = None
+            if n > 200:
+                upd = max(60, n // 5)
+                # bias: 70% from heavy, 30% from the rest
+                heavy_k = min(len(heavy_indices), int(0.7 * upd))
+                rest_k = upd - heavy_k
+                idxs = []
+                if heavy_k > 0:
+                    idxs.extend(random.sample(heavy_indices, heavy_k))
+                if rest_k > 0:
+                    # sample from remaining indices
+                    # create a cheap pool by slicing a shuffled permutation of idx_by_weight_desc
+                    # but avoid heavy part
+                    pool = idx_by_weight_desc[heavy_cut:]
+                    if rest_k >= len(pool):
+                        idxs.extend(pool)
                     else:
-                        new_order = mutate(cur_order, rate=0.45)
-                else:
-                    # equal bin count: try structure moves to break through
-                    r = random.random()
-                    if r < 0.40:
-                        new_order = bin_emptying_move(cur_order, sc.bins, sc.bw, pace=pace)
-                        if random.random() < 0.35:
-                            new_order = mutate(new_order, rate=0.22)
-                    elif r < 0.80:
-                        # complement pairing injection from best
-                        how_many = 1 if n < 200 else 2
-                        new_order = move_groups_consecutive(cur_order, best_groups, how_many=how_many)
-                        if random.random() < 0.40:
-                            new_order = mutate(new_order, rate=0.18)
-                    else:
-                        new_order = mutate(cur_order, rate=0.30)
+                        idxs.extend(random.sample(pool, rest_k))
+                idxset = set(idxs)
 
-            # (7.1) Two-stage screening
-            # If partial heavy-prefix already opens too many bins vs current, skip full decode.
-            # Use a lenient margin.
-            if n > 60 and random.random() < 0.85:
-                pb_new = partial_bins_used(new_order, partial_M)
-                pb_cur = partial_bins_used(cur_order, partial_M)
-                # if clearly worse, reject
-                if pb_new > pb_cur + 1 and cur_fit[0] <= best_fit[0] + 2:
-                    continue
+                # occasional block perturbation over a weight group
+                if weight_groups and random.random() < 0.12:
+                    block = random.choice(weight_groups)
 
-            # Full decode
-            new_bins, new_bw = decode_best_fit_lookahead(new_order)
-            new_fit = fitness_from(new_bins, new_bw)
-            new_sig = signature_from_bw(new_bw)
+            r = random.random()
+            noise_amp = base_noise
 
-            # Acceptance
-            if accept_move(cur_fit, new_fit, elapsed=(time.time() - start), limit=effective_limit):
-                scouts[si] = Scout(new_order, new_bins, new_bw, new_fit, new_sig)
-                accepted_moves += 1
+            new_pos = pos[:]  # copy then modify selected dims
 
-                # Update global best
-                if better(new_fit, best_fit):
-                    update_best(new_order, new_bins, new_bw, new_fit, new_sig)
+            # Apply updates
+            if idxset is None:
+                # small n: update all
+                for d in range(n):
+                    x = new_pos[d]
+                    step = r * wf * (leader_pos[d] - x)
+                    y = x + step + random.uniform(-noise_amp, noise_amp)
+                    new_pos[d] = clamp01(y)
+            else:
+                for d in idxset:
+                    x = new_pos[d]
+                    step = r * wf * (leader_pos[d] - x)
+                    y = x + step + random.uniform(-noise_amp, noise_amp)
+                    new_pos[d] = clamp01(y)
 
-    return {"packing": best_packing, "bin_weights": best_bw}
+                if block is not None:
+                    # perturb whole group together (same delta)
+                    delta = random.uniform(-noise_amp, noise_amp)
+                    for d in block:
+                        new_pos[d] = clamp01(new_pos[d] + delta)
+
+            bins, binw, fit_new, timed_out = decode_portfolio(new_pos, it, max_iters, best_bins, best_binw)
+            if timed_out:
+                return {"packing": best_bins, "bin_weights": best_binw}
+
+            if fit_new <= fit_i:
+                scouts[i] = new_pos
+                scout_fit[i] = fit_new
+                scout_bins[i] = bins
+                scout_binw[i] = binw
+                no_improve_i[i] = 0
+
+                if fit_new < best_fit:
+                    best_fit = fit_new
+                    best_pos = new_pos[:]
+                    best_bins = [b[:] for b in bins]
+                    best_binw = binw[:]
+                    no_improve_global = 0
+            else:
+                no_improve_i[i] += 1
+
+    return {"packing": best_bins, "bin_weights": best_binw}

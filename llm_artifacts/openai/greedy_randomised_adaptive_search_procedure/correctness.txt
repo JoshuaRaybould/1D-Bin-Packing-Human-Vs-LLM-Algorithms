@@ -11,3 +11,5 @@ greedy_randomised_adaptive_search_procedure_2_post_plan : CORRECT
 greedy_randomised_adaptive_search_procedure_2_performance_3 : CORRECT
 greedy_randomised_adaptive_search_procedure_2_performance_4 : Time limit given to the algorithm was not respected.
 greedy_randomised_adaptive_search_procedure_0_post_plan : best 1.0253833972601532
+
+During testing this would not work on occasion, so we use the next best: greedy_randomised_adaptive_search_procedure_2_performance_3.py, with ratio: 1.0268459156318575

@@ -1,5 +1,5 @@
 # anthropic
-# simulated_annealing_2_initial
+# simulated_annealing_2_initial.py
 
 def solve(bin_capacity: int, weights: list[int], time_limit: float) -> dict:
     import random

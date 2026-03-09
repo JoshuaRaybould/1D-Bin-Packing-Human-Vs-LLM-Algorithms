@@ -16,3 +16,5 @@ fitness_dependent_optimiser_2_correctness_1 : CORRECT
 fitness_dependent_optimiser_2_post_plan : CORRECT
 fitness_dependent_optimiser_2_performance_4 : CORRECT
 fitness_dependent_optimiser_0_post_plan : best 1.0269103394530041
+
+This did not always respect the time limit in testing, nor did the second best so we instead used the next best which was: fitness_dependent_optimiser_2_post_plan.py with ratio: 1.027042084802439
