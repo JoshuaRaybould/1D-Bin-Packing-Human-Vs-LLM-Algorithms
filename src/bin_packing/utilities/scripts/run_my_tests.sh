@@ -1,37 +1,29 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
-
-cd "$PROJECT_DIR"
-
-# Prefer a local venv if present; otherwise use system python3
-if [[ -x "$PROJECT_DIR/venv/bin/python" ]]; then
-  PY="$PROJECT_DIR/venv/bin/python"
-elif [[ -x "$PROJECT_DIR/.venv/bin/python" ]]; then
-  PY="$PROJECT_DIR/.venv/bin/python"
-else
-  PY="$(command -v python3)"
-fi
-
-MAIN="main.py"
-RUNS=5
-#CSV="my_test_results.csv"
-CSV="falkenauer_results.csv"
-
-algos=(rbf sa aco tabu gga vns fdo grasp)
-
-# sets=(our-u-100 our-u-200 our-u-400 our-u-800 our-u-1600)
-sets=(our-u-100 our-u-200 our-u-400 our-u-600 our-u-800 our-u-1000 our-u-1200 our-u-1400 our-u-1600)
-sets=(falkenauer-120 falkenauer-250 falkenauer-500 falkenauer-1000)
-
-for algo in "${algos[@]}"; do
-  for setname in "${sets[@]}"; do
-    echo "Running: algo=$algo set=$setname runs=$RUNS"
-    "$PY" "$MAIN" --algo "$algo" --set "$setname" --runs "$RUNS" --csv "$CSV"
-  done
+#!/bin/bash
+ALGOS=(
+     "vns" "fdo" "rbf" "sa" "tabu" "gga" "aco" "grasp"
+)
+DATASETS=(
+    #"our-u-100" "our-u-200" "our-u-400" "our-u-600" "our-u-800"
+    #"our-u-1000" "our-u-1200" "our-u-1400"
+    "our-u-1600"
+)
+CSV_FILE="my_test_results.csv"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+SRC_DIR="$( cd "$SCRIPT_DIR/../../.." &> /dev/null && pwd )"
+cd "$SRC_DIR" || exit
+echo "================================================="
+echo " Starting experiments"
+echo " Results will be saved to: $CSV_FILE"
+echo " Working directory set to: $PWD"
+echo "================================================="
+for dataset in "${DATASETS[@]}"; do
+    for algo in "${ALGOS[@]}"; do
+        echo "-> Running Dataset: $dataset | Algorithm: $algo | Runs: 5"
+        python3 -m bin_packing.main --algo "$algo" --set "$dataset" --csv "$CSV_FILE" --runs 5 --tpi 10
+        if [ $? -ne 0 ]; then
+            echo "   [!] Error running $algo on $dataset. Moving to next..."
+        fi
+    done
 done
-
-echo "Done. CSV: $PROJECT_DIR/$CSV"
-
+echo "================================================="
+echo " Experiments completed!"

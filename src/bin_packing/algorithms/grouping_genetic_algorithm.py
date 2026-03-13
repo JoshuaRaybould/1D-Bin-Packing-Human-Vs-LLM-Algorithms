@@ -330,14 +330,14 @@ def groupingGeneticAlgorithm(binCapacity, weights, timeLimit):
     start_time = time.time()
     timeBudget = 0.9 * timeLimit
 
-    populationSize = 16
+    populationSize = 18
     elitistSize = 4
     numberToCreate = 8
     # The elites are half of the parents, first the fathers then mothers
     # So the number of children being generated from parents shouldn't exceed twice the number of elites
     actualNumToCreate = min(numberToCreate, min(elitistSize * 2, populationSize-elitistSize))
     generation = 0
-    maxGeneration = 70
+    maxGeneration = 110
     crossoverProbability = 0.4
 
     crossoverMinPercent = 1 - crossoverProbability
@@ -391,6 +391,7 @@ def groupingGeneticAlgorithm(binCapacity, weights, timeLimit):
             newPopulation.append(population[x]) 
             
         while len(newPopulation) < elitistSize + actualNumToCreate:
+            elapsed = time.time() - start_time
             if elapsed >= timeBudget:
                 break
             goodParentIndex = parentIndexes["good"][curParentsIndex]
@@ -410,7 +411,7 @@ def groupingGeneticAlgorithm(binCapacity, weights, timeLimit):
                     break
                 children[1] = crossover(population[randomParentIndex], population[goodParentIndex], weights, binCapacity)
             else:
-                children = [population[goodParentIndex], population[randomParentIndex]]
+                children = [pickle.loads(pickle.dumps(population[goodParentIndex], -1)), pickle.loads(pickle.dumps(population[randomParentIndex], -1))]
 
             elapsed = time.time() - start_time
             if elapsed >= timeBudget:
@@ -427,6 +428,7 @@ def groupingGeneticAlgorithm(binCapacity, weights, timeLimit):
 
         position = elitistSize
         while len(newPopulation) < populationSize:
+            elapsed = time.time() - start_time
             if elapsed >= timeBudget:
                 break
             child = mutate(population[position], weights, binCapacity)
@@ -445,6 +447,9 @@ def groupingGeneticAlgorithm(binCapacity, weights, timeLimit):
         fitness = [x for _, x in populationAndFitness]
         best = 0
         bestBins = len(population[best]["bin_groups"])
+
+        for i in range(0, len(population)):
+            population[i]["bin_order"].sort(key=lambda group: population[i]["bin_weights"][group], reverse=True)
   
     # Convert from encoding back to normal
     bins = {}
