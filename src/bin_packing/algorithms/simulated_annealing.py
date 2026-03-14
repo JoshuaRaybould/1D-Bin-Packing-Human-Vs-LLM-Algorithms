@@ -8,8 +8,8 @@ def simulatedAnnealing(binCapacity, weights, decreasing, timeLimit):
     start_time = time.time()
     timeBudget = 0.95 * timeLimit
 
-    temperature = 50000
-    cooling = 0.99998
+    temperature = 1000000
+    cooling = 0.9995
     candidateSolution = helpers.firstFit(binCapacity, weights, decreasing)
 
     # We can use the lower bound as a way to check if we have arrived at the ideal solution (though it may not be achievable)
@@ -101,9 +101,9 @@ def simulatedAnnealing(binCapacity, weights, decreasing, timeLimit):
                         candidateSolution["bin_weights"].pop(i)
                         candidateSolution["packing"].pop(i)
 
-       
-        # Decrease temperature
-        temperature = temperature * cooling
+        if tweaked:
+            # Decrease temperature
+            temperature = temperature * cooling
 
     return candidateSolution
 
