@@ -12,7 +12,7 @@ def applyPace(currentSolution, weights, binCapacity, fitness, solIndex, pace):
         curBinIndex = move[1]
         otherBinIndex = move[2]
         if otherBinIndex >= len(currentSolution["packing"]):
-            return
+            continue
         otherBinWeight = currentSolution["bin_weights"][otherBinIndex] 
 
         if otherBinWeight + itemWeight <= binCapacity:
@@ -61,11 +61,16 @@ def calcFitness(population, fitness):
             minFitnessIndex = x
     return (maxFitnessIndex, minFitnessIndex)
 
-def adaptiveFDO(binCapacity, weights, timeLimit):
+def FDO(binCapacity, weights, timeLimit, useTimeLimit=False):
+    if not useTimeLimit:
+      timeLimit = 1000 # effectively unlimited
+      maxIterations = 70
+    else:
+      maxIterations = float("inf") 
     start_time = time.time()
-    timeBudget = 0.95 * timeLimit
+    timeBudget = 0.98 * timeLimit
 
-    populationSize = 10
+    populationSize = 20
     population = []
 
     lowerBound = helpers.getLowerBound(weights, binCapacity)
@@ -74,7 +79,7 @@ def adaptiveFDO(binCapacity, weights, timeLimit):
     for _ in range(0, populationSize):
         population.append(helpers.firstFitWithContainingBin(binCapacity, weights, False))
 
-    wf = 0
+    wf = 1
     fitness = []
     (maxFitnessIndex, minFitnessIndex) = calcFitness(population, fitness)
     maxFitness = fitness[maxFitnessIndex]
@@ -85,7 +90,7 @@ def adaptiveFDO(binCapacity, weights, timeLimit):
     bestLen = len(bestSolByLen["packing"])
     newBestSolution = []
     iteration = 0
-    maxIterations = 150
+
     while iteration < maxIterations and len(bestSolution["packing"]) != lowerBound:
         elapsed = time.time() - start_time
         if elapsed >= timeBudget:
@@ -99,7 +104,7 @@ def adaptiveFDO(binCapacity, weights, timeLimit):
 
         fws = []
         for x in range(0, len(population)):
-            fw = (fitness[x]/maxFitness) - wf
+            fw = (fitness[x]/maxFitness) * wf
             fws.append(fw)
 
         # Now move each bee
@@ -131,7 +136,7 @@ def adaptiveFDO(binCapacity, weights, timeLimit):
             else:
                 currentSolution = population[x]
 
-                tasks = numItems * fw
+                tasks = numItems * fws[x]
                 # Determine pace
                 pace = []
                 items = list(range(0, numItems))

@@ -56,7 +56,8 @@ def quickValidatePacking(instance, packing, algBins, optBins):
 def testAlgorithmCorrectness(algorithm, instances):
 
     for instance in instances:
-        packing = algorithm(instance["bin_capacity"], instance["weights"])
+        timeLimit = 1/600 * len(instance["weights"])
+        packing = algorithm(instance["bin_capacity"], instance["weights"], timeLimit)
         
         algBins = len(packing["bin_weights"])
         optBins = instance["optimal_solution"]
