@@ -13,7 +13,6 @@ def randomisedBestFit(binCapacity, weights, timeLimit):
         indexes[num] = tmp
 
     # Then do best fit
-    # Each bin is of the form [[values], total_weight]
     bins = {}
     bins["packing"], bins["bin_weights"] = [], []
     for index in indexes:

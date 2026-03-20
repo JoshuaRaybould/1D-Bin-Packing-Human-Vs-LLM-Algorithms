@@ -1,10 +1,7 @@
 import random
 from . import helpers
-import random
 import pickle
 import time
-
-totalTimeFitting = 0
 
 def preAllocateItems(binCapacity, weights, binGroups, binWeights, encoding):
     binGroups[0] = [0]
@@ -188,24 +185,6 @@ def rearrangeByPairs(child, unassignedItems, weights, binCapacity):
                         
     return child
 
-def fillGroup(parent1, parent2Groups, unassignedItems1):
-
-    for groupIndex in parent2Groups:
-        # We need to go through every single value in the groups and assign if unassigned, or change bin
-        for item in parent2Groups[groupIndex]:
-            itemCurrentGroup = parent1["encoding"][item]
-
-            if itemCurrentGroup == -1:
-                unassignedItems1.remove(item)
-                parent1["encoding"][item] = groupIndex
-            else:
-                parent1["bin_groups"][itemCurrentGroup].remove(item)
-                if not parent1["bin_groups"][itemCurrentGroup]:
-                    parent1["bin_groups"].pop(itemCurrentGroup)
-                parent1["encoding"][item] = groupIndex
-
-        parent1["bin_groups"][groupIndex] = parent2Groups[groupIndex]
-
 def addBinToChildSol(child, parentOrders, binNum):
     parent = parentOrders[0]
     parentBinOrder = parentOrders[1]
@@ -216,11 +195,12 @@ def addBinToChildSol(child, parentOrders, binNum):
     for item in curBin:
         if child["encoding"][item] != -1:
             return
+        
+    numBinGroups = len(child["bin_groups"])
     
     for item in curBin:
-        child["encoding"][item] = binNum
+        child["encoding"][item] = numBinGroups
     
-    numBinGroups = len(child["bin_groups"])
     child["bin_groups"][numBinGroups] = curBin.copy()
     binWeight = parent["bin_weights"][parentBinLabel]
     child["bin_weights"][numBinGroups] = binWeight
@@ -280,10 +260,10 @@ def mutate(child, weights, binCapacity):
 
     childBinOrder = child["bin_order"]
 
-    emptiestBin = childBinOrder[-1]
+    emptierBin = childBinOrder[-1]
     childBinOrder.pop(-1)
-    # Always delete the emptiest bin
-    binsToDelete = [emptiestBin] 
+    # Always delete the last bin (tends to be emptier, and is emptiest in the case of solutions not crossed-over)
+    binsToDelete = [emptierBin] 
 
     numBinsToDelete = min(3, len(childBinOrder))
 
@@ -294,7 +274,7 @@ def mutate(child, weights, binCapacity):
     
     unassignedItems = []
 
-    # Remove the bins, we then run FFD to put the items back into groups
+    # Remove the bins, we then run rearrange by pairs to put the items back into groups
     for binToDelete in binsToDelete:
         curRemovedItems = child["bin_groups"].pop(binToDelete)
         child["bin_weights"].pop(binToDelete)
@@ -326,19 +306,24 @@ def scoreFitnesses(population, fitness):
     return best
 
 
-def groupingGeneticAlgorithm(binCapacity, weights, timeLimit):
-    start_time = time.time()
-    timeBudget = 0.9 * timeLimit
+def groupingGeneticAlgorithm(binCapacity, weights, timeLimit, useTimeLimit=False):
+    if not useTimeLimit:
+        timeLimit = 1000 # effectively unlimited
+        maxGeneration = 90
+    else:
+       maxGeneration= float("inf") # effectively unlimited
 
-    populationSize = 18
+    start_time = time.time()
+    timeBudget = 0.95 * timeLimit
+
+    populationSize = 16
     elitistSize = 4
     numberToCreate = 8
     # The elites are half of the parents, first the fathers then mothers
     # So the number of children being generated from parents shouldn't exceed twice the number of elites
     actualNumToCreate = min(numberToCreate, min(elitistSize * 2, populationSize-elitistSize))
     generation = 0
-    maxGeneration = 110
-    crossoverProbability = 0.4
+    crossoverProbability = 0.5
 
     crossoverMinPercent = 1 - crossoverProbability
     population = []
@@ -437,11 +422,9 @@ def groupingGeneticAlgorithm(binCapacity, weights, timeLimit):
 
         population = newPopulation
         
-        #
         fitness = []
         best = scoreFitnesses(population, fitness)
 
-        #print(population)
         populationAndFitness = sorted(zip(population, fitness), key=lambda popFit: popFit[1], reverse=True)
         population = [x for x, _ in populationAndFitness]
         fitness = [x for _, x in populationAndFitness]

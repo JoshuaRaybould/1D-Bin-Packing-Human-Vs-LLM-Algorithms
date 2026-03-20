@@ -9,8 +9,12 @@ def calcFitness(solution):
         fitness += (binWeight * binWeight)
     return fitness
 
-def bestImprovement(solution, weights, binCapacity):
+def bestImprovement(solution, weights, binCapacity, start_time, timeBudget):
     while True:
+        elapsed = time.time() - start_time
+        if elapsed >= timeBudget:
+            return solution
+        
         # First iterate through all bins, selecting items from just those which aren't full
         items = []
         bins  = []
@@ -19,7 +23,7 @@ def bestImprovement(solution, weights, binCapacity):
                 bins.append(x)
                 for item in solution["packing"][x]:
                     items.append([item, x])
-        items = sorted(items, key=lambda x: x[0], reverse=True)
+        items = sorted(items, key=lambda x: weights[x[0]])
 
         # First value in tuple is index in items of the item to move. Second is bin to move to.
         bestTransfer = (0, 0) 
@@ -56,7 +60,7 @@ def bestImprovement(solution, weights, binCapacity):
                     item1Bin, item2Bin = item1[1], item2[1]
 
                     # If swapping is feasible
-                    if solution["bin_weights"][item2Bin] + item1Weight <= binCapacity and solution["bin_weights"][item1Bin] + item2Weight <= binCapacity:
+                    if solution["bin_weights"][item2Bin] + item1Weight - item2Weight <= binCapacity and solution["bin_weights"][item1Bin] + item2Weight - item1Weight <= binCapacity:
                         bin1Score, bin2Score = solution["bin_weights"][item1Bin], solution["bin_weights"][item2Bin]
                         originalBinsScore = (bin1Score * bin1Score) + (bin2Score * bin2Score)
 
@@ -120,7 +124,7 @@ def shake(incumbentSolution, unmoved, weights, binCapacity):
         selectedIndex = random.randint(0, len(unmoved) - 1)
         curItemIndex = unmoved[selectedIndex]
         curWeight = weights[curItemIndex]
-        curItemBin = incumbentSolution["containing_bin"][curItemIndex] # findContainingBin(curItemIndex, incumbentSolution)
+        curItemBin = incumbentSolution["containing_bin"][curItemIndex]
 
         # Check and add any possible single moves
         for x in range(0, len(incumbentSolution["bin_weights"])):
@@ -134,16 +138,14 @@ def shake(incumbentSolution, unmoved, weights, binCapacity):
             swappingItemWeight = weights[unmoved[x]]
             if x != selectedIndex and swappingItemWeight != curWeight:
                 if swappingItemWeight > spaceWhenRemoved:
-                    break
+                    continue
                 elif swappingItemWeight >= curWeight and unmoved[x] not in incumbentSolution["packing"][curItemBin]:
                     # -1 meaning the bin unmoved[x] is in has not yet been determined (though it is in a different bin to our item)
                     moves["swap"].append([x, -1]) 
                     continue
                 
-                swappingItemBin = incumbentSolution["containing_bin"][unmoved[x]] # findContainingBin(unmoved[x], incumbentSolution)
-                #print("item should be in the below bin")
-                #print("item is: " + str(unmoved[x]))
-                #print(incumbentSolution["packing"][swappingItemBin])
+                swappingItemBin = incumbentSolution["containing_bin"][unmoved[x]]
+
                 otherBinSpace = binCapacity - (incumbentSolution["bin_weights"][swappingItemBin] - swappingItemWeight)
                 if otherBinSpace >= curWeight:
                     moves["swap"].append([x, swappingItemBin])
@@ -166,6 +168,15 @@ def shake(incumbentSolution, unmoved, weights, binCapacity):
             incumbentSolution["bin_weights"][binToMoveTo] += curWeight
             incumbentSolution["containing_bin"][curItemIndex] = binToMoveTo
 
+            if not incumbentSolution["packing"][curItemBin]:
+                incumbentSolution["packing"].pop(curItemBin)
+                incumbentSolution["bin_weights"].pop(curItemBin)
+               
+                # We need to update all of our bin indexes now
+                for containingBin in incumbentSolution["containing_bin"]:
+                    if incumbentSolution["containing_bin"][containingBin] > curItemBin:
+                        incumbentSolution["containing_bin"][containingBin] -= 1
+
             unmoved.pop(selectedIndex)
         else:
             swappingMove = selectedMove - len(moves["single"])
@@ -176,7 +187,6 @@ def shake(incumbentSolution, unmoved, weights, binCapacity):
 
             if binToMoveTo == -1:
                 binToMoveTo = incumbentSolution["containing_bin"][itemIndex]
-                # binToMoveTo = findContainingBin(itemIndex, incumbentSolution)
 
             incumbentSolution["packing"][curItemBin].remove(curItemIndex)
             incumbentSolution["bin_weights"][curItemBin] -= curWeight
@@ -196,26 +206,29 @@ def shake(incumbentSolution, unmoved, weights, binCapacity):
     return incumbentSolution
         
 
-def variableNeighbourhoodSearch(binCapacity, weights, candidateSolution, timeLimit):
+def variableNeighbourhoodSearch(binCapacity, weights, candidateSolution, timeLimit, useTimeLimit=False):
+    if not useTimeLimit:
+        timeLimit = 1000 # effectively unlimited
+        maxIterations = 4
+    else:
+        maxIterations = float("inf") 
     start_time = time.time()
-    timeBudget = 0.95 * timeLimit
+    timeBudget = 0.98 * timeLimit
 
-    incumbentSolution = candidateSolution
+    incumbentSolution = pickle.loads(pickle.dumps(candidateSolution, -1))
     incumbentFitness = calcFitness(incumbentSolution)
 
-    kMax = 6
+    kMax = 3
     iteration = 0
-    totalIterations = 15
 
     lowerBound = helpers.getLowerBound(weights, binCapacity)
 
     indexArr = []
-    #print(weights)
-    #print(incumbentSolution)
+
     for x in range(0, len(weights)):
         indexArr.append(x)
 
-    while iteration < totalIterations and len(incumbentSolution["packing"]) > lowerBound: 
+    while iteration < maxIterations and len(incumbentSolution["packing"]) > lowerBound: 
         iteration += 1
         k = 1
 
@@ -230,19 +243,19 @@ def variableNeighbourhoodSearch(binCapacity, weights, candidateSolution, timeLim
             newSolution = pickle.loads(pickle.dumps(incumbentSolution, -1))
             for x in range(0, k):
                 newSolution = shake(newSolution, unmoved, weights, binCapacity)
-            newSolution = bestImprovement(newSolution, weights, binCapacity)
+            newSolution = bestImprovement(newSolution, weights, binCapacity, start_time, timeBudget)
             newSolFitness = calcFitness(newSolution)
             if newSolFitness > incumbentFitness:
                 incumbentSolution = newSolution
                 incumbentFitness = newSolFitness
-                k = 0
+                k = 1
             else:
                 k += 1
 
     return incumbentSolution
 
-def variableNeighbourhoodSearchFFD(binCapacity, weights, timeLimit):
+def variableNeighbourhoodSearchFFD(binCapacity, weights, timeLimit, useTimeLimit):
     candidateSolution = helpers.firstFitWithContainingBin(binCapacity, weights, True)
-    return variableNeighbourhoodSearch(binCapacity, weights, candidateSolution, timeLimit)
+    return variableNeighbourhoodSearch(binCapacity, weights, candidateSolution, timeLimit, useTimeLimit)
 
 

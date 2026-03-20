@@ -9,9 +9,15 @@ def everyAlphaUsed(averageCosts):
             return False
     return True
 
-def reactiveGRASP(binCapacity, weights, timeLimit):
+def reactiveGRASP(binCapacity, weights, timeLimit, useTimeLimit=False):
+    if not useTimeLimit:
+        timeLimit = 1000 # effectively unlimited
+        maxIterations = 10
+    else:
+       maxIterations = float("inf") 
+
     start_time = time.time()
-    timeBudget = 0.95 * timeLimit
+    timeBudget = 0.98 * timeLimit
 
     alphaVals = [0.05, 0.1, 0.15]
     probabilities = []
@@ -34,7 +40,7 @@ def reactiveGRASP(binCapacity, weights, timeLimit):
     for x in range(0, len(weights)):
         indexes.append(x)
     indexes.sort(key=lambda itemIndex: weights[itemIndex], reverse=True) # Saves time finding best and worst quality items
-    while iteration < 10:
+    while iteration < maxIterations:
         elapsed = time.time() - start_time
         if elapsed >= timeBudget:
             break
@@ -97,8 +103,8 @@ def reactiveGRASP(binCapacity, weights, timeLimit):
         elapsed = time.time() - start_time
         if elapsed >= timeBudget:
             break
-        elapsed = time.time() - start_time
-        candidateSolution = tabu_search.tabuSearch(binCapacity, weights, candidateSolution, True, timeBudget - elapsed)
+
+        candidateSolution = tabu_search.tabuSearch(binCapacity, weights, candidateSolution, True, timeBudget - elapsed, True)
 
         solCost = len(candidateSolution["packing"])
         
