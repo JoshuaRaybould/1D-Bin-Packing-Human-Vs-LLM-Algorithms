@@ -9,8 +9,12 @@ def calcFitness(solution):
         fitness += (binWeight * binWeight)
     return fitness
 
-def bestImprovement(solution, weights, binCapacity):
+def bestImprovement(solution, weights, binCapacity, start_time, timeBudget):
     while True:
+        elapsed = time.time() - start_time
+        if elapsed >= timeBudget:
+            return solution
+        
         # First iterate through all bins, selecting items from just those which aren't full
         items = []
         bins  = []
@@ -239,7 +243,7 @@ def variableNeighbourhoodSearch(binCapacity, weights, candidateSolution, timeLim
             newSolution = pickle.loads(pickle.dumps(incumbentSolution, -1))
             for x in range(0, k):
                 newSolution = shake(newSolution, unmoved, weights, binCapacity)
-            newSolution = bestImprovement(newSolution, weights, binCapacity)
+            newSolution = bestImprovement(newSolution, weights, binCapacity, start_time, timeBudget)
             newSolFitness = calcFitness(newSolution)
             if newSolFitness > incumbentFitness:
                 incumbentSolution = newSolution

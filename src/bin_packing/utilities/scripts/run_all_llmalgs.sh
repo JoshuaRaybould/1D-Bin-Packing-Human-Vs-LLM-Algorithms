@@ -2,12 +2,10 @@
 
 # Define the algorithm list
 ALGOS=(
-    # Core Algorithms
-    "rbf" "sa" "tabu" "gga" "aco" "grasp" "vns" "fdo"
     # Anthropic LLM Algorithms
-    "anthropic-aco" "anthropic-fdo" "anthropic-ga" "anthropic-grasp" "anthropic-sa" "anthropic-tabu" "anthropic-vns"
+    "anthropic-aco" "anthropic-fdo" "anthropic-ga" "anthropic-grasp" "anthropic-sa" "anthropic-ts" "anthropic-vns"
     # OpenAI LLM Algorithms
-    "openai-aco" "openai-fdo" "openai-ga" "openai-grasp" "openai-sa" "openai-tabu" "openai-vns"
+    "openai-aco" "openai-fdo" "openai-ga" "openai-grasp" "openai-sa" "openai-ts" "openai-vns"
 )
 
 # Define dataset groups

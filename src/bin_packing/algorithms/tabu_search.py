@@ -59,6 +59,8 @@ def tabuSearch(binCapacity, weights, candidateSolution, fastSearch, timeLimit, u
    tabuList = []
    tabuMaxLen = 8
    tabuPos = 0
+   emptyProb = 0.6
+   emptyMinPercent = 1 - emptyProb
 
    bestSolution = pickle.loads(pickle.dumps(candidateSolution, -1))
 
@@ -128,9 +130,9 @@ def tabuSearch(binCapacity, weights, candidateSolution, fastSearch, timeLimit, u
 
          elif choice == 2:
             # If possible, move an item from bin i to bin j
-            # 60% the time intentionally target the emptiest bin instead of i
+            # Target the empty bin (1 - emptyMinPercent) of the time
             useEmptiest = random.random()
-            if useEmptiest > 0.4:
+            if useEmptiest > emptyMinPercent:
                if j != emptiestBin:
                   i = emptiestBin 
                else:
@@ -209,6 +211,8 @@ def tabuSearch(binCapacity, weights, candidateSolution, fastSearch, timeLimit, u
          if candidateSolution["bin_weights"][i] == 0:
             candidateSolution["bin_weights"].pop(i)
             candidateSolution["packing"].pop(i)
+            tabuList = []
+            tabuPos = 0
 
    return determineBest(bestSolution, candidateSolution)
 

@@ -121,7 +121,7 @@ def build_parser():
 
    return parser
 
-TIMED_ALGORITHMS = {"rbf", "sa", "ts", "gga", "aco", "grasp", "vns", "fdo"}
+TIMED_ALGORITHMS = {"sa", "ts", "gga", "aco", "grasp", "vns", "fdo"}
 
 def select_algorithm(name: str):
     algorithm_map = {
