@@ -3,6 +3,12 @@ from . import helpers
 import pickle
 import time
 
+def sortWeights(weights):
+    indexes = list(range(0, len(weights)))
+    indexes.sort(key=lambda itemIndex: weights[itemIndex], reverse=True)
+    weights = sorted(weights, reverse=True)
+    return weights, indexes
+
 def preAllocateItems(binCapacity, weights, binGroups, binWeights, encoding):
     binGroups[0] = [0]
     binWeights[0] = weights[0]
@@ -21,7 +27,6 @@ def preAllocateItems(binCapacity, weights, binGroups, binWeights, encoding):
     return len(weights)
 
 def randomisedFirstFitEncoded(binCapacity, weights, binGroups, binWeights, encoding, numPreAllocated):
-    # We don't directly shuffle the weights since they are used for every instance
     itemOrder = []
     # Only deal with items not already allocated
     for x in range(numPreAllocated, len(weights)):
@@ -309,21 +314,23 @@ def scoreFitnesses(population, fitness):
 def groupingGeneticAlgorithm(binCapacity, weights, timeLimit, useTimeLimit=False):
     if not useTimeLimit:
         timeLimit = 1000 # effectively unlimited
-        maxGeneration = 90
+        maxGeneration = 70
     else:
        maxGeneration= float("inf") # effectively unlimited
 
     start_time = time.time()
     timeBudget = 0.95 * timeLimit
 
+    weights, indexMapping = sortWeights(weights)
+
     populationSize = 16
-    elitistSize = 4
-    numberToCreate = 8
+    elitistSize = 3
+    numberToCreate = 6
     # The elites are half of the parents, first the fathers then mothers
     # So the number of children being generated from parents shouldn't exceed twice the number of elites
     actualNumToCreate = min(numberToCreate, min(elitistSize * 2, populationSize-elitistSize))
     generation = 0
-    crossoverProbability = 0.5
+    crossoverProbability = 0.4
 
     crossoverMinPercent = 1 - crossoverProbability
     population = []
@@ -444,7 +451,7 @@ def groupingGeneticAlgorithm(binCapacity, weights, timeLimit, useTimeLimit=False
         bins["packing"].append([])
         bins["bin_weights"].append(0)
         for i in bestSolGroups[groupIndex]:
-            bins["packing"][-1].append(i)
+            bins["packing"][-1].append(indexMapping[i])
             bins["bin_weights"][-1] += weights[i]
  
     return bins
