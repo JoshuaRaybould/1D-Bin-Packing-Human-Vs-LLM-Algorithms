@@ -139,15 +139,11 @@ def shake(incumbentSolution, unmoved, weights, binCapacity):
             if x != selectedIndex and swappingItemWeight != curWeight:
                 if swappingItemWeight > spaceWhenRemoved:
                     continue
-                elif swappingItemWeight >= curWeight and unmoved[x] not in incumbentSolution["packing"][curItemBin]:
-                    # -1 meaning the bin unmoved[x] is in has not yet been determined (though it is in a different bin to our item)
-                    moves["swap"].append([x, -1]) 
-                    continue
                 
                 swappingItemBin = incumbentSolution["containing_bin"][unmoved[x]]
 
                 otherBinSpace = binCapacity - (incumbentSolution["bin_weights"][swappingItemBin] - swappingItemWeight)
-                if otherBinSpace >= curWeight:
+                if otherBinSpace >= curWeight and curItemBin != swappingItemBin:
                     moves["swap"].append([x, swappingItemBin])
         
         # if no moves can be done with our selected item, remove it
@@ -185,8 +181,6 @@ def shake(incumbentSolution, unmoved, weights, binCapacity):
 
             binToMoveTo = moves["swap"][swappingMove][1]
 
-            if binToMoveTo == -1:
-                binToMoveTo = incumbentSolution["containing_bin"][itemIndex]
 
             incumbentSolution["packing"][curItemBin].remove(curItemIndex)
             incumbentSolution["bin_weights"][curItemBin] -= curWeight
@@ -254,7 +248,7 @@ def variableNeighbourhoodSearch(binCapacity, weights, candidateSolution, timeLim
 
     return incumbentSolution
 
-def variableNeighbourhoodSearchFFD(binCapacity, weights, timeLimit, useTimeLimit):
+def variableNeighbourhoodSearchFFD(binCapacity, weights, timeLimit, useTimeLimit=False):
     candidateSolution = helpers.firstFitWithContainingBin(binCapacity, weights, True)
     return variableNeighbourhoodSearch(binCapacity, weights, candidateSolution, timeLimit, useTimeLimit)
 

@@ -67,8 +67,6 @@ def buildParentSets(population, elististSize):
     while parentsSelected < elististSize:
         goodParentIndex = random.randint(0, elististSize - 1)
         randomParentIndex = random.randint(elististSize, popSize - 1)
-        while goodParentIndex == randomParentIndex:
-            randomParentIndex = random.randint(elististSize, popSize - 1)
         
         parentIndexes["good"].append(goodParentIndex)
         parentIndexes["random"].append(randomParentIndex)
@@ -265,10 +263,10 @@ def mutate(child, weights, binCapacity):
 
     childBinOrder = child["bin_order"]
 
-    emptierBin = childBinOrder[-1]
+    emptiestBin = childBinOrder[-1]
     childBinOrder.pop(-1)
-    # Always delete the last bin (tends to be emptier, and is emptiest in the case of solutions not crossed-over)
-    binsToDelete = [emptierBin] 
+    # Always delete the last bin - the emptiest
+    binsToDelete = [emptiestBin] 
 
     numBinsToDelete = min(3, len(childBinOrder))
 
@@ -314,7 +312,7 @@ def scoreFitnesses(population, fitness):
 def groupingGeneticAlgorithm(binCapacity, weights, timeLimit, useTimeLimit=False):
     if not useTimeLimit:
         timeLimit = 1000 # effectively unlimited
-        maxGeneration = 70
+        maxGeneration = 90
     else:
        maxGeneration= float("inf") # effectively unlimited
 
@@ -391,17 +389,19 @@ def groupingGeneticAlgorithm(binCapacity, weights, timeLimit, useTimeLimit=False
             curParentsIndex += 1
 
             # Crossover
-            # Crossover is expensive so we are going to do it 50% of the time
+            # Crossover is expensive so we are going to do it 40% of the time
             prob = random.random()
 
             children = [0, 0]            
 
             if prob > crossoverMinPercent:
                 children[0] = crossover(population[goodParentIndex], population[randomParentIndex], weights, binCapacity)
+                children[0]["bin_order"].sort(key=lambda group: children[0]["bin_weights"][group], reverse=True)
                 elapsed = time.time() - start_time
                 if elapsed >= timeBudget:
                     break
                 children[1] = crossover(population[randomParentIndex], population[goodParentIndex], weights, binCapacity)
+                children[1]["bin_order"].sort(key=lambda group: children[1]["bin_weights"][group], reverse=True)
             else:
                 children = [pickle.loads(pickle.dumps(population[goodParentIndex], -1)), pickle.loads(pickle.dumps(population[randomParentIndex], -1))]
 
