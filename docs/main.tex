@@ -755,7 +755,7 @@ allows the algorithm sufficient time to escape local optima and converge on near
 solutions. TS and GRASP form a consistent mid-tier, generally producing deviations in
 the range of 2--4\%. ACO produces broadly comparable deviations to TS and GRASP but
 with steeper runtime scaling, discussed below. FDO and RBF are consistently the weakest
-performers. RBF approaches or exceeds 7\% throughout, as expected from a single-pass
+performers. RBF exceeds 7\% throughout, as expected from a single-pass
 heuristic with no improvement phase. FDO's poor results are likely attributable to the
 inherent difficulty of translating the continuous FDO velocity mechanism effectively to
 a discrete combinatorial domain.
@@ -1257,7 +1257,7 @@ play to its strengths, but struggles considerably on SA where understanding of t
 
 Both models deviated from the specified paradigm on FDO, with neither producing a 
 faithful velocity-based translation. This is perhaps unsurprising given that FDO is a 
-relatively recent and sparsely documented algorithm whose discrete adaptation for the 
+relatively recent and more sparsely documented algorithm whose discrete adaptation for the 
 BPP has limited prior work. In this context, the models likely defaulted to more 
 familiar and well-represented approaches rather than attempting a genuine FDO 
 translation. Whether this constitutes a failure depends on how the task is framed: if 
