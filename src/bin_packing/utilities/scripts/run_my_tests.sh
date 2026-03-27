@@ -1,6 +1,6 @@
 #!/bin/bash
 ALGOS=(
-    "vns" "fdo" "rbf" "sa" "ts" "gga" "aco" "grasp"
+    "vns" "fdo" "rbf" "sa" "ts" "ga" "aco" "grasp"
 )
 DATASETS=(
     "our-u-100" "our-u-200" "our-u-400" "our-u-600" "our-u-800"

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Define the algorithm list (Only time-limited core algorithms)
-ALGOS=("rbf" "sa" "ts" "gga" "aco" "grasp" "vns" "fdo")
+ALGOS=("rbf" "sa" "ts" "ga" "aco" "grasp" "vns" "fdo")
 
 # Define dataset groups
 FALKENAUER=("falkenauer-120" "falkenauer-250" "falkenauer-500" "falkenauer-1000")

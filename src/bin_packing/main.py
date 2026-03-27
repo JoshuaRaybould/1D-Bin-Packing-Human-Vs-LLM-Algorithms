@@ -72,7 +72,7 @@ def build_parser():
    parser.add_argument(
       "--algo",
       # required=True,
-      choices=["rbf", "sa", "ts", "gga", "aco", "grasp", "vns", "fdo", 
+      choices=["rbf", "sa", "ts", "ga", "aco", "grasp", "vns", "fdo", 
                "anthropic-aco", "anthropic-fdo", "anthropic-ga", "anthropic-grasp", "anthropic-sa", "anthropic-ts", "anthropic-vns", 
                "openai-aco", "openai-fdo", "openai-ga", "openai-grasp", "openai-sa", "openai-ts", "openai-vns"
                ],
@@ -85,20 +85,13 @@ def build_parser():
    parser.add_argument(
       "--mode",
       default="default",
-      choices=["default", "test", "choose", "generate"],
+      choices=["default", "test", "choose"],
       help="How to run the selected algorithm."
    )
-
-   # generation / writing options
-   parser.add_argument("--outdir", default="instances", help="Output folder for generated instance .txt files.")
 
    # mode-specific options
    parser.add_argument("--num", type=int, default=10, help="For mode=choose: number of instances.")
    # parser.add_argument("--print-sols", action="store_true", help="Print per-instance solutions.")
-
-   parser.add_argument("--count", type=int, default=20, help="For set=/our-uniform: number of instances.")
-   parser.add_argument("--cap", type=int, default=100, help="For set=/our-uniform: bin capacity.")
-   parser.add_argument("--items", type=int, default=100, help="For set=/our-uniform: number of items.")
 
    parser.add_argument(
    "--csv",
@@ -121,14 +114,14 @@ def build_parser():
 
    return parser
 
-TIMED_ALGORITHMS = {"sa", "ts", "gga", "aco", "grasp", "vns", "fdo"}
+TIMED_ALGORITHMS = {"sa", "ts", "ga", "aco", "grasp", "vns", "fdo"}
 
 def select_algorithm(name: str):
     algorithm_map = {
          "rbf": randomised_best_fit.randomisedBestFit,
          "sa": simulated_annealing.simulatedAnnealingFFD,
          "ts": tabu_search.tabuSearchFFD,
-         "gga": grouping_genetic_algorithm.groupingGeneticAlgorithm,
+         "ga": grouping_genetic_algorithm.groupingGeneticAlgorithm,
          "aco": ant_colony_optimisation.antColonyOptimisation,
          "grasp": GRASP.reactiveGRASP,
          "vns": variable_neighbourhood_search.variableNeighbourhoodSearchFFD,
@@ -273,23 +266,6 @@ def main():
    args = parser.parse_args()
 
    mode = args.mode
-
-   if mode == "generate":
-
-      instances = load_data.getOurRandomInstances(
-         numInstances=args.count,
-         capacity=args.cap,
-         numItems=args.items,
-         distribution="u"
-      )
-
-      # Put num items into the filename prefix
-      prefix = f"our_u_{args.items}"
-
-      out_dir = load_data.saveInstancesAsTxt(instances, prefix)
-
-      print(f"Wrote {len(instances)} instances to: {out_dir.resolve()}")
-      return
 
    chosenAlgorithm = select_algorithm(args.algo)
    instances = load_instances(args)
