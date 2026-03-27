@@ -4,18 +4,24 @@ from . import helpers
 import time
 
 # Decreasing is to decide whether to use first fit with or without putting the data in decreasing order first
-def simulatedAnnealing(binCapacity, weights, decreasing, timeLimit):
-    start_time = time.time()
-    timeBudget = 0.95 * timeLimit
+def simulatedAnnealing(binCapacity, weights, decreasing, timeLimit, useTimeLimit=False):
+    if not useTimeLimit:
+        timeLimit = 1000 # effectively unlimited
+        stopping_temp = 0.01
+    else:
+        stopping_temp = 0 # Exploit for as long as time allows
 
-    temperature = 1000000
-    cooling = 0.9995
+    start_time = time.time()
+    timeBudget = 0.98 * timeLimit
+
+    temperature = 20000
+    a = 0.9996
     candidateSolution = helpers.firstFit(binCapacity, weights, decreasing)
 
     # We can use the lower bound as a way to check if we have arrived at the ideal solution (though it may not be achievable)
     lowerBound = helpers.getLowerBound(weights, binCapacity)
-    iteration = 0
-    while len(candidateSolution["bin_weights"]) > lowerBound and temperature > 0.01 and iteration < 1500000:
+
+    while len(candidateSolution["bin_weights"]) > lowerBound and temperature > stopping_temp:
         elapsed = time.time() - start_time
         if elapsed >= timeBudget:
             break
@@ -103,12 +109,9 @@ def simulatedAnnealing(binCapacity, weights, decreasing, timeLimit):
 
         if tweaked:
             # Decrease temperature
-            temperature = temperature * cooling
+            temperature = temperature * a
 
     return candidateSolution
 
-def simulatedAnnealingFFD(binCapacity, weights, timeLimit):
-    return simulatedAnnealing(binCapacity, weights, True, timeLimit)
-
-#def simulatedAnnealingFF(binCapacity, weights, timeLimit):
-#    return simulatedAnnealing(binCapacity, weights, False, timeLimit)
+def simulatedAnnealingFFD(binCapacity, weights, timeLimit, useTimeLimit=False):
+    return simulatedAnnealing(binCapacity, weights, True, timeLimit, useTimeLimit)

@@ -72,9 +72,9 @@ def build_parser():
    parser.add_argument(
       "--algo",
       # required=True,
-      choices=["rbf", "sa", "tabu", "gga", "aco", "grasp", "vns", "fdo", 
-               "anthropic-aco", "anthropic-fdo", "anthropic-ga", "anthropic-grasp", "anthropic-sa", "anthropic-tabu", "anthropic-vns", 
-               "openai-aco", "openai-fdo", "openai-ga", "openai-grasp", "openai-sa", "openai-tabu", "openai-vns"
+      choices=["rbf", "sa", "ts", "ga", "aco", "grasp", "vns", "fdo", 
+               "anthropic-aco", "anthropic-fdo", "anthropic-ga", "anthropic-grasp", "anthropic-sa", "anthropic-ts", "anthropic-vns", 
+               "openai-aco", "openai-fdo", "openai-ga", "openai-grasp", "openai-sa", "openai-ts", "openai-vns"
                ],
       help="Which algorithm to run."
    )
@@ -85,20 +85,13 @@ def build_parser():
    parser.add_argument(
       "--mode",
       default="default",
-      choices=["default", "test", "choose", "generate"],
+      choices=["default", "test", "choose"],
       help="How to run the selected algorithm."
    )
-
-   # generation / writing options
-   parser.add_argument("--outdir", default="instances", help="Output folder for generated instance .txt files.")
 
    # mode-specific options
    parser.add_argument("--num", type=int, default=10, help="For mode=choose: number of instances.")
    # parser.add_argument("--print-sols", action="store_true", help="Print per-instance solutions.")
-
-   parser.add_argument("--count", type=int, default=20, help="For set=/our-uniform: number of instances.")
-   parser.add_argument("--cap", type=int, default=100, help="For set=/our-uniform: bin capacity.")
-   parser.add_argument("--items", type=int, default=100, help="For set=/our-uniform: number of items.")
 
    parser.add_argument(
    "--csv",
@@ -113,19 +106,26 @@ def build_parser():
       help="Time per item in seconds (time limit per instance = num_items * tpi). Default=1/600."
    )
 
+   parser.add_argument(
+      "--use-limit",
+      action="store_true",
+      help="Flag to tell human written algorithms to use just the time limit."
+   )
+
    return parser
 
+TIMED_ALGORITHMS = {"sa", "ts", "ga", "aco", "grasp", "vns", "fdo"}
 
 def select_algorithm(name: str):
     algorithm_map = {
          "rbf": randomised_best_fit.randomisedBestFit,
          "sa": simulated_annealing.simulatedAnnealingFFD,
-         "tabu": tabu_search.tabuSearchFFD,
-         "gga": grouping_genetic_algorithm.groupingGeneticAlgorithm,
+         "ts": tabu_search.tabuSearchFFD,
+         "ga": grouping_genetic_algorithm.groupingGeneticAlgorithm,
          "aco": ant_colony_optimisation.antColonyOptimisation,
          "grasp": GRASP.reactiveGRASP,
          "vns": variable_neighbourhood_search.variableNeighbourhoodSearchFFD,
-         "fdo": FDO.adaptiveFDO,
+         "fdo": FDO.FDO,
 
          # LLM Generated Algotihms
          # Anthropic
@@ -134,7 +134,7 @@ def select_algorithm(name: str):
          "anthropic-ga": anthropic_genetic_algorithm.solve,
          "anthropic-grasp": anthropic_GRASP.solve,
          "anthropic-sa": anthropic_simulated_annealing.solve,
-         "anthropic-tabu": anthropic_tabu_search.solve,
+         "anthropic-ts": anthropic_tabu_search.solve,
          "anthropic-vns": anthropic_variable_neighbourhood_search.solve,
                
          # OpenAI
@@ -143,7 +143,7 @@ def select_algorithm(name: str):
          "openai-ga": openai_genetic_algorithm.solve,
          "openai-grasp": openai_GRASP.solve,
          "openai-sa": openai_simulated_annealing.solve,
-         "openai-tabu": openai_tabu_search.solve,
+         "openai-ts": openai_tabu_search.solve,
          "openai-vns": openai_variable_neighbourhood_search.solve,
 
     }
@@ -174,7 +174,7 @@ def load_instances(args):
    
    raise ValueError(f"Unknown set: {set_name}")
 
-def applyAlgorithm(instances, chosenAlgorithm, runs, timePerItem=(1/600)):
+def applyAlgorithm(instances, chosenAlgorithm, algo_name, runs, timePerItem=(1/600), use_limit=False):
    print(timePerItem)
    ratioScore = 0
    totalBins = 0
@@ -188,17 +188,18 @@ def applyAlgorithm(instances, chosenAlgorithm, runs, timePerItem=(1/600)):
       optBins = instance["optimal_solution"]
       instanceId = instance["file_name"]
 
-      # Decision to use time.perf_counter() was due to https://builtin.com/articles/timing-functions-python
-      # time.time() is apparently not as precise and timeit is generally for small bits of code
       for x in range(0, runs):
-         
-         # Derive a unique, repeatable seed from (instanceId, runIndex) to make each trial reproducible and not affected by other runs.
          seedBytes = hashlib.sha256(f"{instanceId}|{x}".encode()).digest()
          curSeed = int.from_bytes(seedBytes[:8], "big")
          random.seed(curSeed)
 
          startTime = time.perf_counter()
-         packing = chosenAlgorithm(instance["bin_capacity"], instance["weights"].copy(), timeLimit)
+         
+         if algo_name in TIMED_ALGORITHMS:
+             packing = chosenAlgorithm(instance["bin_capacity"], instance["weights"].copy(), timeLimit, use_limit)
+         else:
+             packing = chosenAlgorithm(instance["bin_capacity"], instance["weights"].copy(), timeLimit)
+         
          endTime = time.perf_counter()
          totalTime += (endTime - startTime)
 
@@ -266,23 +267,6 @@ def main():
 
    mode = args.mode
 
-   if mode == "generate":
-
-      instances = load_data.getOurRandomInstances(
-         numInstances=args.count,
-         capacity=args.cap,
-         numItems=args.items,
-         distribution="u"
-      )
-
-      # Put num items into the filename prefix
-      prefix = f"our_u_{args.items}"
-
-      out_dir = load_data.saveInstancesAsTxt(instances, prefix)
-
-      print(f"Wrote {len(instances)} instances to: {out_dir.resolve()}")
-      return
-
    chosenAlgorithm = select_algorithm(args.algo)
    instances = load_instances(args)
 
@@ -299,7 +283,7 @@ def main():
          if len(chosenInstances) == numInstances:
             break
 
-      summary = applyAlgorithm(chosenInstances, chosenAlgorithm, args.runs, args.tpi)
+      summary = applyAlgorithm(chosenInstances, chosenAlgorithm, args.algo, args.runs, args.tpi, args.use_limit)
 
       if args.csv:
          row = {"dataset": args.set, "algo": args.algo, "runs": args.runs, **summary}
@@ -307,7 +291,7 @@ def main():
       return
 
    # default
-   summary = applyAlgorithm(instances, chosenAlgorithm, args.runs, args.tpi)
+   summary = applyAlgorithm(instances, chosenAlgorithm, args.algo, args.runs, args.tpi, args.use_limit)
    if args.csv:
       row = {"dataset": args.set, "algo": args.algo, "runs": args.runs, **summary}
       append_summary_to_csv(args.csv, row)

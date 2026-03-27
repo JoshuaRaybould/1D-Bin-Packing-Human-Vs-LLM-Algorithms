@@ -25,6 +25,7 @@ def pickWeightIndex(curAntSol, indexes, pheromoneScores, pheromoneImportance, he
    # If we haven't started building the solution or there is not enough space in the last bin, open a new one
    if not curAntSol or curBinWeight + weights[lightestItem] > binCapacity:
       curAntSol.append([])
+      curBinWeight = 0
    
    probabilities = []
    total = 0
@@ -69,15 +70,22 @@ def updatePheromones(solution, fitness, pheromoneScores, weights):
             if x != y:
                pheromoneScores[(weights[bin[x]], weights[bin[y]])] += fitness
 
-def antColonyOptimisation(binCapacity, weights, timeLimit):
-   start_time = time.time()
-   timeBudget = 0.95 * timeLimit
+def antColonyOptimisation(binCapacity, weights, timeLimit, useTimeLimit=False):
+   if not useTimeLimit:
+      timeLimit = 1000 # effectively unlimited
+      maxIterations = 7
+   else:
+      maxIterations = float("inf")
 
-   populationSize = 4 # Number of "ant trails"
+   start_time = time.time()
+   timeBudget = 0.98 * timeLimit
+
+   populationSize = 3 # Number of "ant trails"
    evaporationParameter = 0.2
    heuristicImportance = 10
    pheromoneImportance = 2
    numItems = len(weights)
+   iteration = 0
    
    iterationsBetweenGlobalReinforcement = math.ceil(500/numItems)
    # Approximate τmax based on work by Stutzle and Hoos
@@ -109,7 +117,9 @@ def antColonyOptimisation(binCapacity, weights, timeLimit):
    lowerBound = helpers.getLowerBound(weights, binCapacity)
 
    # Have each ant build a solution
-   for y in range (0, 5):
+   while iteration < maxIterations:
+      iteration += 1
+
       elapsed = time.time() - start_time
       if elapsed >= timeBudget:
          return convertToBins(bestSolutionSoFar, weights)
@@ -150,7 +160,7 @@ def antColonyOptimisation(binCapacity, weights, timeLimit):
       if elapsed >= timeBudget:
          return convertToBins(bestSolutionSoFar, weights)
 
-      if y % iterationsBetweenGlobalReinforcement == 0:
+      if iteration % iterationsBetweenGlobalReinforcement == 0:
          # update pheromone using best
          updatePheromones(bestSolutionSoFar, bestSolutionSoFarFitness, pheromoneScores, weights)
       else:
