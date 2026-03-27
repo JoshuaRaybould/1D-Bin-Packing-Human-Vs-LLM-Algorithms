@@ -12,7 +12,7 @@
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{0.6em}
 
-\title{Evaluating Randomised Algorithms and Their LLM Generated Equivalents on the Bin Packing Problem}
+\title{Evaluating Randomised Algorithms and Their LLM Generated Counterparts on the Bin Packing Problem}
 \author{Joshua Raybould}
 \date{March 2026}
 
@@ -29,32 +29,32 @@ To establish a robust baseline, we implemented, tuned, and evaluated eight stoch
 
 To evaluate LLM code generation capability, we developed an automated iterative refinement pipeline incorporating correctness validation and performance-driven optimisation, and applied it to two flagship models: OpenAI's GPT-5.2 and Anthropic's Claude Opus 4.6. Each model was tasked with generating implementations for all seven non-trivial algorithms under a zero-shot prompting strategy with Chain-of-Thought reasoning. The resulting implementations were evaluated against the human baselines on standard BPPLIB benchmark instances, with each implementation allocated an identical wall-clock time budget.
 
-The results show that both LLMs produced functionally correct implementations for every algorithm, and frequently matched or exceeded human-level performance. Anthropic's Claude Opus 4.6 achieved the lowest weighted average deviation from the known optimal on four of the seven algorithms, incorporating design choices absent from the human baselines---notably a dynamic cooling schedule for Simulated Annealing and an iterative bin-reduction formulation for Tabu Search. The human implementations retained an advantage on the Genetic Algorithm and Variable Neighbourhood Search, where the human's choice of bin-level encoding and exhaustive local search respectively outperformed the alternative approaches adopted by both LLMs. OpenAI's GPT-5.2 exhibited higher variance, achieving the strongest result on ACO but struggling on SA due to a fundamental objective function flaw that rendered the search almost entirely uninformative despite producing syntactically correct and executable code. Neither model produced a faithful adaptation of the Fitness Dependent Optimizer, instead defaulting to more familiar algorithmic paradigms. These findings suggest that flagship LLMs are now capable of producing competitive metaheuristic implementations for well-studied combinatorial problems, but remain susceptible to subtle reasoning errors that are difficult to detect through automated correctness testing alone.
+The results show that both LLMs produced functionally correct code for six of the seven algorithms, deviating from the specified paradigm only on FDO, and frequently matched or exceeded human-level performance. Anthropic's Claude Opus 4.6 achieved the lowest weighted average deviation from the known optimal on four of the seven algorithms, incorporating design choices absent from the human baselines---notably a dynamic cooling schedule for Simulated Annealing and an iterative bin-reduction formulation for Tabu Search. The human implementations retained an advantage on the Genetic Algorithm and Variable Neighbourhood Search, where the human's choice of bin-level encoding and exhaustive local search respectively outperformed the alternative approaches adopted by both LLMs. OpenAI's GPT-5.2 exhibited higher variance, achieving the strongest result on ACO but struggling on SA due to a fundamental objective function flaw that rendered the search almost entirely uninformative despite producing syntactically correct and executable code. Neither model produced a faithful adaptation of the Fitness Dependent Optimizer, instead defaulting to more familiar algorithmic paradigms. These findings suggest that flagship LLMs are now capable of producing competitive metaheuristic implementations for well-studied combinatorial problems, but remain susceptible to subtle reasoning errors that are difficult to detect through automated correctness testing alone.
 \end{abstract}
 
 \section{Introduction}
 
 \subsection{Problem Background}
-The bin packing problem (BPP) is one of the central problems in combinatorial optimisation. In its standard formulation, a set of items with corresponding values (generally size or weight) must be packed into an unlimited supply of bins, each with a uniform capacity. The objective is to assign the items to the bins such that the total number of bins used is minimised. This is the one-dimensional (1D) bin packing problem, which is conceptually similar to the 1D cutting stock problem (\cite{maxence}). The 1D BPP is primarily studied in two variants: the offline problem, where the algorithm has access to the weights of all items simultaneously, and the online problem, where items are revealed and packed one at a time. In this study, we focus on the offline case.
+The bin packing problem (BPP) is one of the central problems in combinatorial optimisation. In its standard formulation, a set of items with corresponding values (generally size or weight) must be packed into an unlimited supply of bins, each with a uniform capacity. The objective is to assign the items to the bins such that the total number of bins used is minimised. This is the one-dimensional (1D) bin packing problem, which is conceptually similar to the 1D cutting stock problem \cite{maxence}. The 1D BPP is primarily studied in two variants: the offline problem, where the algorithm has access to the weights of all items simultaneously, and the online problem, where items are revealed and packed one at a time. In this study, we focus on the offline case.
 
-The 1D BPP is classified as NP-Hard, meaning that no known polynomial-time algorithm exists for computing an exact solution. Consequently, heuristic and randomised algorithms are often employed to obtain near-optimal solutions efficiently. Beyond its theoretical significance, bin packing has numerous real-world applications, ranging from loading transport vehicles with weight capacities to minimising waste in industrial cutting processes (\cite{munien}). Additionally, many complex scheduling problems contain the BPP as a special case.
+The 1D BPP is classified as NP-Hard, meaning that no known polynomial-time algorithm exists for computing an exact solution. Consequently, heuristic and randomised algorithms are often employed to obtain near-optimal solutions efficiently. Beyond its theoretical significance, bin packing has numerous real-world applications, ranging from loading transport vehicles with weight capacities to minimising waste in industrial cutting processes \cite{munien}. Additionally, many complex scheduling problems contain the BPP as a special case.
 
 \subsection{Problem Definition}
-Here we formalise the classical offline 1D BPP. The following definition is relatively standard and is arrived at with reference to \cite{munien}, though equivalent normalised versions are also common in the literature (see \cite{maxence}). 
+Here we formalise the classical offline 1D BPP. The following definition is relatively standard and is arrived at with reference to \cite{munien}, though equivalent normalised versions are also common in the literature \cite{maxence}. 
 
 Let $C$ denote the uniform capacity of each bin, and let $w_{i}$ denote the weight (or equivalently, size) of item $i$, such that $w_{i} \leq C$ for all items. We define $u$ as an upper bound on the minimum number of bins required to pack all $n$ items. We introduce the binary decision variable $y_{j}$, where $y_j = 1$ if the $j$-th bin is opened (used in the solution), and $0$ otherwise, for $1 \leq j \leq u$. Items are labeled $i \in \{1, \dots, n\}$, and we define a second binary variable $x_{ij}$, which equals $1$ if item $i$ is packed in bin $j$, and $0$ otherwise. The objective function is:
 $$ \min\sum_{j=1}^{u} y_j $$ 
 This aims to minimise the total number of open bins, subject to the following constraints:
 $$ \sum_{j=1}^{u} x_{ij} = 1, \quad \forall i = 1, \dots, n $$
 $$ \sum_{i=1}^{n} x_{ij} w_{i}  \leq C y_j, \quad \forall j = 1, \dots, u $$
-The first constraint ensures that each item is packed into exactly one bin. The second constraint guarantees that the sum of the weights of the items in any given bin does not exceed the bin capacity $C$, and forces $y_j$ to be $1$ if any item is placed in bin $j$.
+The first constraint ensures that each item is packed into exactly one bin. The second constraint guarantees that the sum of the weights of the items in any given bin does not exceed the bin capacity $C$.
 
 \subsection{Complexity Analysis}
 
 The 1D offline BPP is strongly NP-hard, which can be established via a polynomial-time reduction from the 3-Partition problem \cite{garey}. Given an instance of 3-Partition consisting of $3m$ integers $a_1, \dots, a_{3m}$ where $B/4 < a_i < B/2$ for all $i$ and $\sum_{i=1}^{3m} a_i = mB$, we construct a BPP instance with bin capacity $B$ and items of exactly those weights. A valid packing into $m$ bins exists if and only if a solution to 3-Partition exists. Since each $a_i > B/4$, no bin can hold more than three items, and since each $a_i < B/2$, no bin can hold fewer than two; every bin must therefore contain exactly three items summing to $B$. Because 3-Partition is strongly NP-complete \cite{garey}, BPP is strongly NP-hard. As a consequence, no polynomial-time algorithm for solving the BPP to optimality is known, assuming P $\neq$ NP. For large-scale instances, approximation algorithms and stochastic metaheuristics that trade guaranteed optimality for computational efficiency are therefore necessary.
 
 \subsection{Randomised Algorithms}
-Randomised algorithms rely on random variable generation to influence their execution paths, making them non-deterministic. In this context, we define stochastic optimisation as the use of randomness to navigate a search space and find near-optimal solutions efficiently (\cite{sean}). While strict definitions of stochastic optimisation often require a noisy objective function, the algorithms implemented here primarily use random choices to direct the search process. Therefore, these algorithms largely belong to the subfield of metaheuristics, which are problem-independent frameworks that guide and modify underlying heuristics to escape local optima (\cite{yang}). 
+Randomised algorithms rely on random variable generation to influence their execution paths, making them non-deterministic. In this context, we define stochastic optimisation as the use of randomness to navigate a search space and find near-optimal solutions efficiently \cite{sean}. While strict definitions of stochastic optimisation often require a noisy objective function, the algorithms implemented here primarily use random choices to direct the search process. Therefore, these algorithms largely belong to the subfield of metaheuristics, which are problem-independent frameworks that guide and modify underlying heuristics to escape local optima \cite{yang}. 
 
 These algorithms vary drastically in complexity. The simplest approaches might involve randomising the input order before applying a naive greedy heuristic, which is particularly useful for mitigating worst-case inputs generated by adversaries. Conversely, more complex metaheuristics draw inspiration from biological evolution and natural systems. A primary goal of this paper is to benchmark a diverse variety of these approaches.
 
@@ -181,7 +181,7 @@ problem. Rather than allowing LLMs to freely design or discover algorithms,
 this framing separates two questions that are often conflated: whether 
 LLMs can produce performant code, and whether they can faithfully implement 
 a given algorithmic paradigm --- including making appropriate design 
-decisions such as objective function selection and parameter tuning --- 
+decisions such as objective function selection and parameter selection --- 
 without the benefit of open-ended exploration.
 
 \section{Human-Implemented Metaheuristics}
@@ -238,7 +238,7 @@ Note that while $L_2$ is the bound we use, there is a slightly tighter bound whi
 
 \subsubsection{Fitness Evaluation}
 
-If the objective function relies solely on the total number of active bins, the fitness landscape remains flat for the vast majority of algorithmic transitions, and so lacks the ability to guide the algorithm's search \cite{gga}. 
+If the objective relied solely on the total number of active bins, it would remain unchanged for the vast majority of transitions — since a move only affects the bin count when it completely empties a bin — leaving the search with no signal to distinguish between neighbouring solutions \cite{gga}.
 
 To circumvent this, we utilise the sum-of-squares objective function, a widely adopted approach originally introduced by Falkenauer for evolutionary bin packing \cite{gga} and subsequently employed across a range of metaheuristic implementations \cite{sonuc, kryz}. We define the fitness of a candidate solution as:
 
@@ -257,7 +257,7 @@ The algorithm first randomly shuffles the input items, then applies the standard
 \subsection{Simulated Annealing (SA)}
 
 \subsubsection{Overview}
-Simulated Annealing (SA) is a probabilistic metaheuristic closely related to hill-climbing. A standard hill-climbing algorithm iteratively generates neighboring candidate solutions and transitions to them only if they offer an improvement. SA modifies this approach by introducing a probability of transitioning to a worse solution. This mechanism provides the search trajectory with opportunities to escape local optima, significantly increasing the likelihood of converging on the global optimum. The probability of accepting a deleterious move depends on a temperature value; the higher this is the more likely the algorithm is to move to worse solutions. The temperature decays over time according to a predefined cooling schedule (\cite{sean}, \cite{gendreau}).
+Simulated Annealing (SA) is a probabilistic metaheuristic closely related to hill-climbing. A standard hill-climbing algorithm iteratively generates neighboring candidate solutions and transitions to them only if they offer an improvement. SA modifies this approach by introducing a probability of transitioning to a worse solution. This mechanism provides the search trajectory with opportunities to escape local optima, significantly increasing the likelihood of converging on the global optimum. The probability of accepting a deleterious move depends on a temperature value; the higher this is the more likely the algorithm is to move to worse solutions. The temperature decays over time according to a predefined cooling schedule \cite{sean}, \cite{gendreau}.
 
 \subsubsection{Implementation}
 The algorithm generates its initial candidate solution using the First-Fit 
@@ -484,7 +484,7 @@ Ant Colony Optimisation (ACO) is a population-based metaheuristic inspired by th
 
 First introduced as Ant System (AS), the framework has seen significant evolution through variants like Elitist AS and MAX-MIN Ant System (MMAS) \cite{stuetzle}, making it highly competitive for complex combinatorial problems \cite{levine}. 
 
-In ACO, artificial ants iteratively construct solutions by selecting components. The probability $p_k(i,j)$ of an ant $k$ transitioning from state $i$ to component $j$ is governed by the following standard equation (\cite{aaron}, \cite{gendreau}):
+In ACO, artificial ants iteratively construct solutions by selecting components. The probability $p_k(i,j)$ of an ant $k$ transitioning from state $i$ to component $j$ is governed by the following standard equation \cite{aaron}, \cite{gendreau}:
 $$p_k(i,j) = \begin{cases} \frac{[\tau(i,j)]^{\alpha}[\eta(i,j)]^{\beta}}{\sum_{c \in C_k(i)} [\tau(i,c)]^{\alpha} [\eta(i,c)]^{\beta}} & \text{if } j \in C_k(i), \\ 0 & \text{otherwise}. \end{cases}$$
 Here, $\tau(i,j)$ represents the accumulated pheromone (the learned historical quality of the component), and $\eta(i,j)$ represents a heuristic value. The parameters $\alpha$ and $\beta$ control the relative influence of the pheromone and the heuristic, respectively. $C_k(i)$ represents the set of feasible components that ant $k$ can currently add to its solution. Once all ants have constructed complete solutions, the pheromone trails are updated: pheromone is added based on the quality of the solutions found, and a global evaporation parameter, $\rho$, is applied to progressively forget older, suboptimal paths and prevent premature convergence.
 
@@ -496,7 +496,7 @@ Through empirical testing and parameter tuning, we observed that this shortened
 execution window necessitated a heavier reliance on greedy choices over 
 historical pheromone accumulation. Consequently, we set the heuristic 
 importance quite high at $\beta = 10$, with the pheromone importance at 
-$\alpha = 2$ and the evaporation rate at $\rho = 0.8$. The heuristic value 
+$\alpha = 2$ and the evaporation rate at $\rho = 0.2$. The heuristic value 
 $\eta$ for an item is defined simply as its weight.
 
 To calculate the aggregate pheromone value for a candidate item $j$ being 
@@ -509,7 +509,7 @@ the pheromone score evaluates to 1, making the initial selection heavily
 dependent on the heuristic $\eta$.
 
 When a solution is completed, the pheromone matrix is updated by first 
-multiplying existing values by $(1 - \rho)$ to simulate evaporation. 
+multiplying existing values by $\rho$ to simulate evaporation. 
 Pheromone is then deposited based on the fitness of the solution, calculated 
 using the normalised sum-of-squares objective function established by 
 Falkenauer \cite{gga}. The deposited amount is the product of the solution's 
@@ -524,20 +524,15 @@ from the MAX-MIN Ant System (MMAS) introduced by Stützle and Hoos
     every $\gamma$ iterations, the global-best ant updates the matrix. We set 
     $\gamma = \lceil 500/n \rceil$, a threshold designed to control the balance 
     between exploration and exploitation within our condensed iteration limit.
-    \item Pheromone Trail Limits: To prevent stagnation, pheromone values are 
-    strictly bounded between $\tau_{\min}$ and $\tau_{\max}$. If a value drops 
-    below $\tau_{\min}$, it is reset to the boundary. Adapting from 
-    \cite{stuetzle}, we calculate these bounds as:
+    \item Pheromone Trail Limits: To prevent stagnation, pheromone values that fall below $\tau_{\min}$ are reset to the boundary. Following Levine \cite{levine}, no upper bound is enforced on pheromone values, as weight pairs can appear multiple times within a single solution, making a strict $\tau_{\max}$ inapplicable. Instead, $\tau_{\max}$ is used solely to set the optimistic initial pheromone values (see below). Adapting from \cite{stuetzle}, we calculate these values as:
     $$\tau_{\max} = \frac{1}{1-\rho}$$
     $$\tau_{\min} = \frac{\tau_{\max}\left(1 - \sqrt[n]{p_{best}}\right)}{(avg - 1)\sqrt[n]{p_{best}}}$$
     where $p_{best}$ is the probability of constructing the best solution after 
     the trails have converged, set here to 0.05, and $avg$ is $n/2$. It is 
-    worth noting this is an approximation in the context of the BPP; because 
+    worth noting these are approximations in the context of the BPP, as 
     the order of items placed within a bin does not alter the final 
-    configuration, the mathematical assumptions underpinning $\tau_{\min}$ are 
-    slightly skewed. Additionally, because weight pairs can appear multiple 
-    times within a single solution, $\tau_{\max}$ acts as a soft reference 
-    rather than a strict upper limit.
+    configuration, slightly skewing the mathematical assumptions underpinning 
+    the original derivation.
     \item Optimistic Initialization: To encourage broad early exploration, all 
     initial pheromone values are optimistically set to $\tau_{\max}$.
 \end{enumerate}
@@ -652,7 +647,7 @@ and Martello \cite{BPPLIB}.
 
 Instance sets of sizes $n \in \{100, 200, 400, 600, 800, 1000, 1200,
 1400, 1600\}$ were generated to observe performance trajectories from
-small-scale to large-scale problems. Item weights were bounded relative to the bin capacity $C$: a minimum
+small-scale to large-scale problems. Item weights were bounded relative to the bin capacity $C = 150$: a minimum
 weight threshold was uniformly sampled from $[0.1C, 0.3C]$ and a maximum
 threshold from $[0.5C, 0.7C]$. The upper bound prevents the generation of
 excessively large items that cannot share a bin with any other item, which would trivialise the
@@ -682,13 +677,19 @@ Execution Time (s) is the mean wall-clock time in seconds across
 the 5 independent runs for a given instance, providing an empirical 
 measure of computational efficiency and runtime scaling behaviour.
 
-Percentage Difference (dif\%) quantifies average-case solution 
-quality relative to the theoretical lower bound. For a given instance 
-$i$, the average number of bins used across $R = 5$ runs is:
-$$\bar{S}_i = \frac{1}{R} \sum_{r=1}^{R} S_{i,r}$$
+Percentage Difference (dif\%) quantifies average-case solution quality relative to the theoretical lower bound. For a given instance $i$, the average number of bins used across $R = 5$ runs is:
+
+\begin{equation}
+    \bar{S}_i = \frac{1}{R} \sum_{r=1}^{R} S_{i,r}
+\end{equation}
+
 The percentage difference for that instance is then:
-$$Dif_i = \left( \frac{\bar{S}_i}{L_{2,i}} \right) - 1$$
-To evaluate scaling behaviour, $Dif_i$ values are averaged across all 
+
+\begin{equation}
+    \text{Dif}_i = \left( \frac{\bar{S}_i}{L_{2,i}} - 1 \right) \times 100
+\end{equation}
+
+To evaluate scaling behaviour, $\text{Dif}_i$ values are averaged across all
 instances within each size class. This aggregated metric provides a 
 robust, standardised measure of how consistently each algorithm 
 approximates the optimal solution across varying problem sizes.
@@ -706,13 +707,12 @@ to right by overall average solution quality.
 
 \begin{table}[H]
 \centering
-\caption{Performance Metrics of Human-Crafted Metaheuristics: Execution Time (s) and 
-Percentage Difference (dif\%) ordered by overall average solution quality.}
+\caption{Performance of Human-Crafted Metaheuristics: Execution Time (s) and Percentage Difference (dif\%) from the $L_2$ lower bound, ordered by overall average solution quality.}
 \label{tab:mega_baseline}
 \resizebox{\textwidth}{!}{
 \begin{tabular}{l cc cc cc cc cc cc cc cc}
 \toprule
-\multirow{2}{*}{$n$} & \multicolumn{2}{c}{GGA} & \multicolumn{2}{c}{VNS} & 
+\multirow{2}{*}{$n$} & \multicolumn{2}{c}{GA} & \multicolumn{2}{c}{VNS} & 
 \multicolumn{2}{c}{SA} & \multicolumn{2}{c}{TS} & \multicolumn{2}{c}{GRASP} & 
 \multicolumn{2}{c}{ACO} & \multicolumn{2}{c}{FDO} & \multicolumn{2}{c}{RBF} \\
 \cmidrule(lr){2-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7} \cmidrule(lr){8-9} 
@@ -720,15 +720,15 @@ Percentage Difference (dif\%) ordered by overall average solution quality.}
  & Time & dif\% & Time & dif\% & Time & dif\% & Time & dif\% & Time & dif\% & 
  Time & dif\% & Time & dif\% & Time & dif\% \\
 \midrule
-100  & 1.05   & 0.90 & 0.22   & 1.30 & 8.82   & 0.83 & 12.38 & 2.02 & 12.51 & 2.01 & 0.55   & 3.30 & 1.28   & 5.14 & 0.01 & 8.11 \\
-200  & 2.81   & 0.89 & 0.91   & 1.18 & 12.11  & 0.73 & 16.94 & 2.02 & 16.22 & 2.33 & 2.11   & 3.22 & 3.29   & 5.67 & 0.02 & 7.45 \\
-400  & 7.88   & 1.93 & 6.11   & 2.29 & 16.12  & 2.02 & 18.41 & 2.87 & 18.15 & 3.28 & 7.79   & 3.92 & 9.19   & 7.10 & 0.05 & 8.23 \\
-600  & 16.42  & 2.25 & 20.13  & 2.49 & 17.16  & 2.48 & 19.70 & 3.11 & 19.61 & 3.55 & 17.30  & 3.81 & 19.38  & 7.41 & 0.11 & 8.37 \\
-800  & 35.85  & 1.71 & 37.92  & 1.92 & 17.41  & 2.04 & 22.06 & 2.75 & 21.80 & 3.18 & 31.05  & 3.43 & 30.55  & 7.15 & 0.19 & 7.76 \\
-1000 & 63.64  & 1.31 & 48.50  & 1.35 & 20.19  & 1.62 & 22.97 & 2.21 & 22.98 & 2.57 & 48.04  & 2.82 & 44.75  & 6.62 & 0.28 & 7.11 \\
-1200 & 83.30  & 2.03 & 146.20 & 2.26 & 18.92  & 2.57 & 25.12 & 3.18 & 25.21 & 3.72 & 69.08  & 3.71 & 63.05  & 7.51 & 0.41 & 8.00 \\
-1400 & 107.93 & 1.48 & 151.84 & 1.62 & 17.58  & 1.93 & 25.79 & 2.77 & 26.74 & 3.22 & 96.47  & 3.29 & 83.91  & 7.10 & 0.53 & 7.43 \\
-1600 & 153.85 & 1.26 & 134.06 & 1.01 & 19.83  & 1.65 & 28.39 & 2.11 & 28.86 & 2.44 & 120.93 & 2.51 & 107.91 & 6.88 & 0.72 & 7.19 \\
+100  & 1.05   & 0.90 & 0.22   & 1.30 & 8.82   & 0.83 & 12.38 & 2.02 & 12.51 & 2.01 & 0.54   & 3.25 & 1.28   & 5.14 & 0.01 & 8.11 \\
+200  & 2.81   & 0.89 & 0.91   & 1.18 & 12.11  & 0.73 & 16.94 & 2.02 & 16.22 & 2.33 & 2.11   & 3.24 & 3.29   & 5.67 & 0.02 & 7.45 \\
+400  & 7.88   & 1.93 & 6.11   & 2.29 & 16.12  & 2.02 & 18.41 & 2.87 & 18.15 & 3.28 & 7.89   & 3.90 & 9.19   & 7.10 & 0.05 & 8.23 \\
+600  & 16.42  & 2.25 & 20.13  & 2.49 & 17.16  & 2.48 & 19.70 & 3.11 & 19.61 & 3.55 & 17.64  & 3.84 & 19.38  & 7.41 & 0.11 & 8.37 \\
+800  & 35.85  & 1.71 & 37.92  & 1.92 & 17.41  & 2.04 & 22.06 & 2.75 & 21.80 & 3.18 & 30.65  & 3.40 & 30.55  & 7.15 & 0.19 & 7.76 \\
+1000 & 63.64  & 1.31 & 48.50  & 1.35 & 20.19  & 1.62 & 22.97 & 2.21 & 22.98 & 2.57 & 48.16  & 2.83 & 44.75  & 6.62 & 0.28 & 7.11 \\
+1200 & 83.30  & 2.03 & 146.20 & 2.26 & 18.92  & 2.57 & 25.12 & 3.18 & 25.21 & 3.72 & 68.92  & 3.73 & 63.05  & 7.51 & 0.41 & 8.00 \\
+1400 & 107.93 & 1.48 & 151.84 & 1.62 & 17.58  & 1.93 & 25.79 & 2.77 & 26.74 & 3.22 & 97.27  & 3.27 & 83.91  & 7.10 & 0.53 & 7.43 \\
+1600 & 153.85 & 1.26 & 134.06 & 1.01 & 19.83  & 1.65 & 28.39 & 2.11 & 28.86 & 2.44 & 123.40 & 2.54 & 107.91 & 6.88 & 0.72 & 7.19 \\
 \midrule
 Avg dif\% & & 1.53 & & 1.71 & & 1.76 & & 2.56 & & 2.92 & & 3.33 & & 6.73 & & 7.74 \\
 \bottomrule
@@ -777,8 +777,7 @@ their fixed iteration budgets directly bound their runtime; the modest growth ob
 reflects slightly more expensive bin operations as average bin occupancy increases with
 instance size. GGA's scaling is steep, driven by its rearrangement by pairs repair
 heuristic, which must process all free items against all active bins following every
-crossover and mutation operation. ACO's scaling is similarly steep, as the pheromone
-matrix grows with the number of distinct item weights in the instance. FDO's scaling
+crossover and mutation operation. ACO scales similarly, as each ant must place more items per solution and pheromone updates must process more item pairings. FDO's scaling
 mirrors GGA and ACO, driven primarily by the cost of deep-copying solution structures
 during each iteration. VNS scales aggressively at larger instance sizes, driven by its exhaustive
 best-improvement local search, which evaluates every possible item transfer
@@ -870,7 +869,7 @@ prompt budget of $p = 5$.
 The pipeline for a single candidate run operates in two distinct phases:
 \begin{enumerate}
     \item Correctness Loop: The initial zero-shot prompt requests the 
-    complete Python algorithm. The generated code is extracted and executed 
+    complete Python algorithm. To ensure a fair comparison and maintain reproducibility, we utilised a standardised prompt template across all LLMs, dynamically substituting only the target algorithm's name into the prompt. The generated code is extracted and executed 
     against a validation suite. If the code throws an execution error or 
     violates constraints (e.g., returning invalid data types), the error 
     traceback is fed back to the LLM in a subsequent prompt with 
@@ -922,7 +921,7 @@ majority if not all of it without any adaptation.
 
 To evaluate the generative capabilities of the selected models, we tested the 
 LLM-generated algorithms against standard benchmark instances from BPPLIB 
-(Falkenauer and Scholl). Because the optima are known for these datasets, the 
+(Falkenauer U and Scholl). Because the optima are known for these datasets, the 
 dif\% metric is calculated exactly as before but uses the known optimal rather 
 than the theoretical lower bound. The new opt.\ metric denotes the total number of instances where an algorithm 
 discovered the optimal solution in at least one of its five independent runs. 
@@ -930,6 +929,8 @@ The weighted average dif\% reported in each table is weighted by the number
 of instances in each dataset class. Randomised Best Fit is excluded from this 
 comparison, as its trivial structure leaves no meaningful implementation design 
 space --- any correct implementation produces equivalent results.
+
+To verify stability, the 5 individual runs comprising each reported average were compared separately; the per-run scores produced consistent rankings across all algorithms, with the sole exception of the Genetic Algorithm where human and Anthropic implementations produced effectively equivalent results.
 
 \begin{table}[H]
 \centering
@@ -983,11 +984,11 @@ Weighted Avg    &      &      & 0.14 &      & 0.15 &      & 0.87 \\
 
 As shown in Table~\ref{tab:ga-comparison}, the human implementation narrowly outperformed Anthropic on both metrics, discovering 1174 optimal solutions at a weighted average dif\% of 0.14\% compared to 1165 and 0.15\%. OpenAI's implementation struggled significantly, finding only 902 optimal solutions with a weighted average dif\% of 0.87\%.
 
-The three implementations differ substantially in their choice of representation. The human uses a grouping genetic algorithm with bin-level encoding throughout: crossover operates directly on bin groups, and a repair heuristic handles any items left unassigned after recombination. Anthropic uses permutation encoding decoded via BFD, with a crossover operator that partially preserves bin structure by alternately inheriting the fullest bins from each parent, followed by a post-decode local search that attempts to empty the lightest bins. OpenAI uses continuous random-key encoding decoded to an item ordering, the most indirect representation of the three, with crossover operators that blend key vectors numerically or combine parent orderings by copying a segment from one parent and filling the remainder from the other.
+The three implementations differ substantially in their choice of representation. The human uses a grouping genetic algorithm with bin-level encoding throughout: crossover operates directly on bin groups, and a repair heuristic handles any items left unassigned after recombination. Anthropic uses permutation encoding decoded via Best Fit, with a crossover operator that partially preserves bin structure by alternately inheriting the fullest bins from each parent, and bin-aware mutations that attempt to empty underutilised bins. OpenAI uses continuous random-key encoding decoded to an item ordering, the most indirect representation of the three, with crossover operators that blend key vectors numerically or combine parent orderings by copying a segment from one parent and filling the remainder from the other.
 
-The human's group-level encoding appears to provide an advantage across most instance classes. Anthropic recovers on the larger falkenauer-1000 class, where its post-decode local search appears to compensate for the less direct encoding. OpenAI's poor performance is consistent with the known difficulty of indirect encodings on grouping problems --- without operators that explicitly preserve or exploit bin structure, the search struggles to discover and maintain high-quality groupings.
+The human's group-level encoding appears to provide an advantage across most instance classes. Anthropic recovers on the larger falkenauer-1000 class, where its bin-aware mutations---which explicitly attempt to empty underutilised bins---appear to compensate for the less direct encoding. OpenAI's poor performance is consistent with the known difficulty of indirect encodings on grouping problems---without operators that explicitly preserve or exploit bin structure, the search struggles to discover and maintain high-quality groupings.
 
-\subsection{Variable Neighbourhood Search}
+\subsection{Variable Neighbourhood Search (VNS)}
 % VNS
 \begin{table}[H]
 \centering
@@ -1163,27 +1164,27 @@ substantially worse than both other implementations.
 \cmidrule(lr){3-4} \cmidrule(lr){5-6} \cmidrule(lr){7-8}
  & & opt. & dif\% & opt. & dif\% & opt. & dif\% \\
 \midrule
-falkenauer-120  & 20   & 5    & 1.84 & 15   & 0.86 & 14   & 0.88 \\
-falkenauer-250  & 20   & 0    & 1.83 & 2    & 1.06 & 3    & 1.04 \\
-falkenauer-500  & 20   & 0    & 1.68 & 0    & 1.04 & 0    & 0.89 \\
-falkenauer-1000 & 20   & 0    & 1.59 & 0    & 1.07 & 0    & 0.89 \\
+falkenauer-120  & 20   & 4    & 1.90 & 15   & 0.86 & 14   & 0.88 \\
+falkenauer-250  & 20   & 0    & 1.86 & 2    & 1.06 & 3    & 1.04 \\
+falkenauer-500  & 20   & 0    & 1.66 & 0    & 1.04 & 0    & 0.89 \\
+falkenauer-1000 & 20   & 0    & 1.57 & 0    & 1.07 & 0    & 0.89 \\
 scholl-10       & 10   & 0    & 5.99 & 0    & 5.06 & 0    & 4.92 \\
-scholl-480      & 480  & 267  & 2.19 & 289  & 2.18 & 319  & 1.59 \\
-scholl-720      & 720  & 531  & 0.63 & 619  & 0.21 & 623  & 0.21 \\
+scholl-480      & 480  & 269  & 2.19 & 289  & 2.18 & 319  & 1.59 \\
+scholl-720      & 720  & 532  & 0.63 & 619  & 0.21 & 623  & 0.21 \\
 \midrule
-Total           & 1290 & 803  &      & 925  &      & 959  &      \\
+Total           & 1290 & 805  &      & 925  &      & 959  &      \\
 Weighted Avg    &      &      & 1.32 &      & 1.03 &      & 0.81 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-As shown in Table~\ref{tab:aco-comparison}, both LLM implementations outperformed the human implementation, which discovered 803 optimal solutions with a weighted average dif\% of 1.32\%. OpenAI achieved the strongest overall result, finding 959 optimal solutions and a weighted average dif\% of 0.81\%, with Anthropic close behind at 925 and 1.03\%.
+As shown in Table~\ref{tab:aco-comparison}, both LLM implementations outperformed the human implementation, which discovered 805 optimal solutions with a weighted average dif\% of 1.32\%. OpenAI achieved the strongest overall result, finding 959 optimal solutions and a weighted average dif\% of 0.81\%, with Anthropic close behind at 925 and 1.03\%.
 
 ACO is sufficiently computationally expensive that all implementations complete very few iterations within the time budget, leaving pheromone trail differentiation from initial values minimal. Performance is therefore driven primarily by single-construction quality rather than accumulated pheromone learning, meaning the results reflect early-stage behaviour rather than the algorithm operating as intended.
 
 Since construction quality is the dominant factor, the most plausible explanation for OpenAI's stronger performance lies in two aspects of its construction. First, it includes a look-ahead that rewards placing an item in a bin if the remaining capacity afterwards is exactly fillable by another unpacked item, directly targeting tight bin filling at each step. Second, it evaluates more ants per iteration than Anthropic across all instance sizes, producing greater construction diversity within the available time budget.
 
-\subsection{Fitness dependent optimiser (FDO)}
+\subsection{Fitness Dependent Optimizer (FDO)}
 % FDO
 \begin{table}[H]
 \centering
@@ -1222,8 +1223,8 @@ The results from Section~\ref{sec:human_eval} provide a clear answer to the firs
 \subsection{LLM-Generated Algorithms}
 
 The results in Section~\ref{sec:llm-eval} provide a broadly positive answer to the second research 
-question. Both LLMs produced functionally correct implementations for all seven 
-algorithms, and both frequently matched or exceeded human-level performance. 
+question. Both LLMs produced functionally correct code for six of the seven 
+algorithms, deviating from the specified paradigm only on FDO, and both frequently matched or exceeded human-level performance.
 Anthropic's Claude Opus 4.6 achieved the strongest result on four of the seven 
 algorithms, with the human implementation outperforming both LLMs on GGA and VNS, 
 and OpenAI achieving the best result on ACO. The Anthropic SA implementation is 
@@ -1265,20 +1266,19 @@ acceptable or even desirable; if the goal is to evaluate a specific algorithm's
 generative capability, it undermines the comparison.
 
 \subsection{Limitations}
-Several limitations of this study warrant acknowledgement. First, only two LLMs were
+Several limitations of this study warrant acknowledgement. First, the human baselines benefited from manual parameter tuning without a fixed budget, whereas the LLMs were constrained to a prompt budget of $p=5$ per run. Furthermore, during the refinement phase, the models only received the most recent working code and its performance metrics, lacking visibility into previously attempted or discarded approaches. The human implementations also prioritised breadth over depth, omitting certain techniques from the reference literature (e.g., the Minimum Bin Slack heuristic in VNS) that could have improved individual algorithm performance. Second, only two LLMs were
 evaluated. The planned inclusion of Google's Gemini 3 Pro was excluded on cost grounds,
 and reasoning-augmented model variants were similarly excluded, both of which restrict
 the generalisability of conclusions about inter-model differences and may have produced
 meaningfully different results, particularly for algorithms where subtle design choices
-have an outsized impact on performance. Second, all implementations were written in
-Python, which imposes computational constraints that disproportionately affect
-iteration-heavy algorithms such as ACO and FDO. A compiled language implementation
-might alter the relative rankings of these algorithms. Third, the BPP is
+have an outsized impact on performance. Third, all implementations were written in
+Python, which imposes computational constraints that disproportionately affect algorithms such as ACO and FDO. A compiled language implementation
+might alter the relative rankings of these algorithms. Fourth, the BPP is
 a well-studied problem with a substantial body of published implementations, meaning
 the models may have had direct or indirect exposure to relevant design patterns during
 training. This makes it difficult to distinguish genuine algorithmic reasoning from
 retrieval of memorised solutions, and strong LLM performance should be interpreted with
-this caveat in mind. Fourth, the LLM generation pipeline is itself stochastic ---
+this caveat in mind. Fifth, the LLM generation pipeline is itself stochastic ---
 running it again would likely produce different implementations, and the results reflect
 one particular instantiation of each model's generative capability. Finally, the initial prompts expressed a preference for fixed-iteration
 implementations with a time budget as a secondary stopping criterion, rather
@@ -1299,7 +1299,7 @@ including how to handle infeasible solutions during the search, since strongly
 infeasible solutions can carry useful structural information that guides the algorithm
 toward feasibility. Including a broader range of LLMs, particularly open-source models
 whose training data is known, would also help disentangle knowledge retrieval from
-reasoning capability. Finally, all implementations in this study were written in
+reasoning capability. Evaluating reasoning-augmented model variants would test whether such capabilities meaningfully improve metaheuristic design quality, particularly for algorithms where the human baselines currently outperform LLM implementations. Additionally, enriching the iterative refinement pipeline---for instance, by supplying the LLM with a complete history of successful and discarded approaches rather than just the latest working version---could yield stronger implementations by allowing the model to learn from its own failed attempts. Finally, all implementations in this study were written in
 Python, which is a relatively accessible language to implement in. It would be
 interesting to evaluate whether the conclusions hold when implementations are required
 in a lower-level compiled language, where the implementation complexity is higher and
@@ -1363,7 +1363,7 @@ algorithmic review, rather than a finished product.
 
 \bibitem{kryz} Krzysztof Fleszar, Khalil S. Hindi, New heuristics for one-dimensional bin-packing, Computers \& Operations Research, Volume 29, Issue 7, 2002, Pages 821-839, ISSN 0305-0548, \url{https://doi.org/10.1016/S0305-0548(00)00082-4}.
 
-\bibitem{gga} Falkenauer, E. (1996). The Grouping Genetic Algorithm. In: Floudas, C.A., Pardalos, P.M. (eds) State of the Art in Global Optimization. Nonconvex Optimization and Its Applications, vol 7. Springer, Boston, MA. \url{https://doi.org/10.1007/978-1-4613-3437-8_17}
+\bibitem{gga} Falkenauer, E. A hybrid grouping genetic algorithm for bin packing. \textit{Journal of Heuristics}, 2(1):5--30, 1996. \url{https://doi.org/10.1007/BF00226291}
 
 \bibitem{quirozca} M. Quiroz-Castellanos, L. Cruz-Reyes, J. Torres-Jimenez, C. Gómez S., H. J. Fraire Huacuja, and A. C. F. Alvim. A grouping genetic algorithm with controlled gene transmission for the bin packing problem. Computers \& Operations Research, 55:52-64, 2015. \url{https://doi.org/10.1016/j.cor.2014.10.010}
 
