@@ -9,6 +9,8 @@ This project implements eight randomised algorithms for the one-dimensional offl
 The human algorithm implementations — the primary (human) contribution of this project — are located in `src/bin_packing/algorithms/`. A longer form report is available at `docs/main.pdf`.
 
 Note that in existing results files our Genetic Algorithm (GA) is referred to as gga rather than ga, we have updated the name to ga for consistency.
+Also the Falkenauer U and Scholl datasets are not included in our repository, so algorithms can not be ran on those.
+
 
 ## Requirements
 
@@ -40,7 +42,6 @@ python -m bin_packing.utilities.generate_instances --count 20 --cap 150 --items 
 ```
 
 ### Stability verification
-(Note, this runs on the Scholl and Falkenauer U datasets and their solutions in particular places, which are not included in the repository)
 
 ```bash
 python -m bin_packing.utilities.variance_check --algo ga --runs 5 --use-limit
