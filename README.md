@@ -21,10 +21,10 @@ All commands should be run from the `src/` directory.
 ### Running an algorithm on a dataset
 
 ```bash
-python -m bin_packing.main --algo gga --set scholl-720 --runs 5 --use-limit --csv results.csv
+python -m bin_packing.main --algo ga --set our-u-200 --runs 5 --use-limit --csv results.csv
 ```
 
-- `--algo`: Algorithm to run. Options: `rbf`, `sa`, `ts`, `gga`, `aco`, `grasp`, `vns`, `fdo`, and LLM variants prefixed with `anthropic-` or `openai-` (e.g., `anthropic-sa`, `openai-aco`).
+- `--algo`: Algorithm to run. Options: `rbf`, `sa`, `ts`, `ga`, `aco`, `grasp`, `vns`, `fdo`, and LLM variants prefixed with `anthropic-` or `openai-` (e.g., `anthropic-sa`, `openai-aco`).
 - `--set`: Instance set. Options include `falkenauer-120`, `falkenauer-250`, `falkenauer-500`, `falkenauer-1000`, `scholl-10`, `scholl-480`, `scholl-720`, `hard`, `test-u`, and generated uniform sets (`our-u-100` through `our-u-1600`).
 - `--runs`: Number of independent runs per instance (default: 1).
 - `--use-limit`: Tells human algorithms to use only the time limit (required for fair comparison with LLM algorithms).
@@ -34,13 +34,14 @@ python -m bin_packing.main --algo gga --set scholl-720 --runs 5 --use-limit --cs
 ### Generating instances
 
 ```bash
-python -m bin_packing.utilities.generate_instances --count 20 --cap 150 --items 400
+python -m bin_packing.utilities.generate_instances --count 20 --cap 150 --items 500
 ```
 
 ### Stability verification
+(Note, this runs on the Scholl and Falkenauer U datasets and their solutions in particular places, which are not included in the repository)
 
 ```bash
-python -m bin_packing.utilities.variance_check --algo gga --num-runs 5 --use-limit
+python -m bin_packing.utilities.variance_check --algo ga --runs 5 --use-limit
 ```
 
 Runs the specified algorithm across the full BPPLIB benchmark suite and records per-instance and aggregate stability data.
@@ -87,8 +88,8 @@ src/bin_packing/
     variance_check.py       Stability verification script
     scripts/                Bash scripts for batch runs
 
-datasets/                   Benchmark and generated instance files
-  Instances/                BPPLIB datasets (Falkenauer U, Scholl, Hard28)
+datasets/                   
+  my_instances/             Our generated instances
 
 docs/                       Reports and figures
   main.pdf                  Longer form report

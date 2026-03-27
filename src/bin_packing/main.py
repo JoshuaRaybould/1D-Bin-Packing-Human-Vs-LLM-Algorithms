@@ -175,7 +175,8 @@ def load_instances(args):
    raise ValueError(f"Unknown set: {set_name}")
 
 def applyAlgorithm(instances, chosenAlgorithm, algo_name, runs, timePerItem=(1/600), use_limit=False):
-   print(timePerItem)
+   # print(timePerItem)
+   print("Started")
    ratioScore = 0
    totalBins = 0
    totalOpt = 0
