@@ -8,6 +8,8 @@ This project implements eight randomised algorithms for the one-dimensional offl
 
 The human algorithm implementations — the primary (human) contribution of this project — are located in `src/bin_packing/algorithms/`. A longer form report is available at `docs/main.pdf`.
 
+Note that in existing results files our Genetic Algorithm (GA) is referred to as gga rather than ga, we have updated the name to ga for consistency.
+
 ## Requirements
 
 - Python 3.11+
