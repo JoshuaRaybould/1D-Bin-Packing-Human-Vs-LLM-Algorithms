@@ -81,7 +81,7 @@ def antColonyOptimisation(binCapacity, weights, timeLimit, useTimeLimit=False):
    timeBudget = 0.98 * timeLimit
 
    populationSize = 3 # Number of "ant trails"
-   evaporationParameter = 0.8
+   evaporationParameter = 0.2
    heuristicImportance = 10
    pheromoneImportance = 2
    numItems = len(weights)
@@ -154,7 +154,7 @@ def antColonyOptimisation(binCapacity, weights, timeLimit, useTimeLimit=False):
             bestSolutionThisIterationFitness = fitness
       
       for pair in pheromoneScores:
-         pheromoneScores[pair] *= (1 - evaporationParameter)
+         pheromoneScores[pair] *= evaporationParameter
       
       elapsed = time.time() - start_time
       if elapsed >= timeBudget:
